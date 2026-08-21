@@ -5,6 +5,7 @@
 import { useRef, useState } from 'react'
 import { Settings, ArrowLeft, Download, Upload, RotateCcw, Check } from 'lucide-react'
 import type { ComponentKind } from '@/engine/types'
+import { COMPONENT_REGISTRY } from '@/engine/components'
 import { useProgressStore, initialState as progressInitialState, type LevelStars } from '@/game/progressStore'
 import { useJournalStore } from '@/game/journalStore'
 import { useQuizStore } from '@/game/quizStore'
@@ -14,7 +15,10 @@ import { Button } from '@/ui/shared/Button'
 
 const EXPORT_FORMAT_VERSION = 1
 
-const VALID_COMPONENT_KINDS: ComponentKind[] = ['client', 'server', 'loadBalancer', 'cache']
+// Derived from the registry (the same single source of truth the palette
+// and engine use) instead of a hand-typed list, so this never goes stale
+// the next time a component kind is added.
+const VALID_COMPONENT_KINDS: ComponentKind[] = Object.keys(COMPONENT_REGISTRY) as ComponentKind[]
 const VALID_STAR_VALUES: LevelStars[] = [0, 1, 2, 3]
 
 /** Keeps only entries whose value is a real star rating (0-3) -- an

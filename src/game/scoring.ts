@@ -106,6 +106,46 @@ export function scoreRun(result: SimResult, slo: SloTarget): ScoreResult {
       margin: marginFromRatio(ratio),
     })
   }
+  if (slo.minDurability !== undefined) {
+    const ratio = result.aggregate.durability > 0 ? slo.minDurability / result.aggregate.durability : Infinity
+    checks.push({
+      label: 'Durability',
+      passed: result.aggregate.durability >= slo.minDurability,
+      actual: `${(result.aggregate.durability * 100).toFixed(3)}%`,
+      target: `≥ ${(slo.minDurability * 100).toFixed(3)}%`,
+      margin: marginFromRatio(ratio),
+    })
+  }
+  if (slo.maxWriteP99Ms !== undefined) {
+    const ratio = result.aggregate.writeP99Ms / slo.maxWriteP99Ms
+    checks.push({
+      label: 'Write p99 latency',
+      passed: ratio <= 1,
+      actual: `${Math.round(result.aggregate.writeP99Ms)}ms`,
+      target: `≤ ${slo.maxWriteP99Ms}ms`,
+      margin: marginFromRatio(ratio),
+    })
+  }
+  if (slo.maxReplicationLagMs !== undefined) {
+    const ratio = result.aggregate.maxReplicationLagMs / slo.maxReplicationLagMs
+    checks.push({
+      label: 'Replication lag',
+      passed: ratio <= 1,
+      actual: `${Math.round(result.aggregate.maxReplicationLagMs)}ms`,
+      target: `≤ ${slo.maxReplicationLagMs}ms`,
+      margin: marginFromRatio(ratio),
+    })
+  }
+  if (slo.maxShardImbalance !== undefined) {
+    const ratio = result.aggregate.maxShardImbalance / slo.maxShardImbalance
+    checks.push({
+      label: 'Shard imbalance',
+      passed: ratio <= 1,
+      actual: `${result.aggregate.maxShardImbalance.toFixed(2)}x`,
+      target: `≤ ${slo.maxShardImbalance.toFixed(2)}x`,
+      margin: marginFromRatio(ratio),
+    })
+  }
 
   const passed = checks.every((c) => c.passed)
   const worstMargin = checks.length > 0 ? Math.min(...checks.map((c) => c.margin)) : 1

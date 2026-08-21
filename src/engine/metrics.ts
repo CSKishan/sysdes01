@@ -56,6 +56,7 @@ export function clamp(value: number, min: number, max: number): number {
 
 const DEFAULT_SERVER_AVAILABILITY = 0.99
 const DEFAULT_LB_AVAILABILITY = 0.999
+const DEFAULT_DB_AVAILABILITY = 0.995
 
 /**
  * Estimates whole-system uptime from the graph's static topology -- a
@@ -110,9 +111,82 @@ export function computeSystemAvailability(graph: SimGraph): number {
       return children.length > 0 ? availabilitySeries(...children.map((c) => walk(c, nextVisited))) : 1
     }
 
+    if (node.config.kind === 'database' || node.config.kind === 'replica') {
+      const own = node.config.availability ?? DEFAULT_DB_AVAILABILITY
+      if (children.length === 0) return own
+      return availabilitySeries(own, ...children.map((c) => walk(c, nextVisited)))
+    }
+
+    if (node.config.kind === 'shardRouter') {
+      // Approximation: modeled the same shape as a load balancer (its own
+      // availability in series with a parallel composition of its shards),
+      // even though in reality only the affected key range goes down if one
+      // shard dies rather than the whole system -- this walk produces one
+      // whole-system number, not a per-key-range one.
+      const own = node.config.availability ?? DEFAULT_LB_AVAILABILITY
+      if (children.length === 0) return own
+      const branchAvailabilities = children.map((c) => walk(c, nextVisited))
+      return availabilitySeries(own, availabilityParallel(...branchAvailabilities))
+    }
+
     return 1
   }
 
   return walk(clientNode.id, new Set())
+}
+
+/** Every node id reachable from the client by following edges forward.
+ * Used so an unwired, decorative node (dropped on the canvas but never
+ * connected to anything) can't count toward a topology-derived metric --
+ * it was never part of the system a write would actually reach. */
+function reachableNodeIds(graph: SimGraph): Set<string> {
+  const clientNode = graph.nodes.find((n) => n.config.kind === 'client')
+  if (!clientNode) return new Set()
+  const outgoing = new Map<string, string[]>()
+  for (const node of graph.nodes) outgoing.set(node.id, [])
+  for (const edge of graph.edges) {
+    if (outgoing.has(edge.source)) outgoing.get(edge.source)!.push(edge.target)
+  }
+  const visited = new Set<string>([clientNode.id])
+  const queue = [clientNode.id]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    for (const next of outgoing.get(current) ?? []) {
+      if (!visited.has(next)) {
+        visited.add(next)
+        queue.push(next)
+      }
+    }
+  }
+  return visited
+}
+
+/**
+ * Estimates the chance a write, once acknowledged, survives losing any one
+ * node holding it (0..1) -- distinct from availability (can a READ be
+ * served right now). A `database` node's own availability stands in for
+ * "chance this copy exists after a crash." A **sync** `replica` counts as
+ * an additional durable copy in parallel (the write reached it before being
+ * acked); an **async** replica does not (it may not have the latest write
+ * yet, so losing the primary can still lose data). Returns 1 (nothing to
+ * lose) when the graph has no database/replica node at all.
+ *
+ * Only counts nodes actually reachable from the client -- an unwired
+ * database dropped on the canvas but never connected to anything doesn't
+ * count as a redundant copy just for existing (see reachableNodeIds).
+ */
+export function computeSystemDurability(graph: SimGraph): number {
+  const reachable = reachableNodeIds(graph)
+  const persistentNodes = graph.nodes.filter(
+    (n) =>
+      reachable.has(n.id) &&
+      (n.config.kind === 'database' ||
+        (n.config.kind === 'replica' && n.config.replicationMode === 'sync')),
+  )
+  if (persistentNodes.length === 0) return 1
+  const survivalChances = persistentNodes.map(
+    (n) => (n.config as { availability?: number }).availability ?? DEFAULT_DB_AVAILABILITY,
+  )
+  return availabilityParallel(...survivalChances)
 }
 

@@ -1,5 +1,13 @@
 import { X } from 'lucide-react'
-import type { CacheConfig, LoadBalancerConfig, NodeConfig, ServerConfig } from '@/engine/types'
+import type {
+  CacheConfig,
+  DatabaseConfig,
+  LoadBalancerConfig,
+  NodeConfig,
+  ReplicaConfig,
+  ServerConfig,
+  ShardRouterConfig,
+} from '@/engine/types'
 import { COMPONENT_REGISTRY } from '@/engine/components'
 import { Panel } from '@/ui/shared/Panel'
 import { Button } from '@/ui/shared/Button'
@@ -57,6 +65,9 @@ export function NodeInspector({
           <LoadBalancerFields config={config} onChange={(c) => onChange(c)} />
         )}
         {config.kind === 'cache' && <CacheFields config={config} onChange={(c) => onChange(c)} />}
+        {config.kind === 'database' && <DatabaseFields config={config} onChange={(c) => onChange(c)} />}
+        {config.kind === 'replica' && <ReplicaFields config={config} onChange={(c) => onChange(c)} />}
+        {config.kind === 'shardRouter' && <ShardRouterFields config={config} onChange={(c) => onChange(c)} />}
         {config.kind === 'client' && (
           <p className="text-xs text-ink-400">This is where requests enter the system.</p>
         )}
@@ -162,6 +173,178 @@ function CacheFields({
           <option value="writeAround">Write-around (skip the shelf on updates)</option>
           <option value="writeBack">Write-back (update later)</option>
         </select>
+      </Field>
+    </>
+  )
+}
+
+function DatabaseFields({
+  config,
+  onChange,
+}: {
+  config: DatabaseConfig
+  onChange: (c: DatabaseConfig) => void
+}) {
+  return (
+    <>
+      <Field label="Engine">
+        <select
+          className={inputClass}
+          value={config.engine}
+          onChange={(e) => onChange({ ...config, engine: e.target.value as DatabaseConfig['engine'] })}
+        >
+          <option value="sql">SQL</option>
+          <option value="nosql">NoSQL</option>
+        </select>
+      </Field>
+      <Field label={`Read capacity: ${config.capacityRps} rps`}>
+        <input
+          type="range"
+          min={5}
+          max={300}
+          step={5}
+          value={config.capacityRps}
+          onChange={(e) => onChange({ ...config, capacityRps: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={`Read speed: ${config.baseMs}ms`}>
+        <input
+          type="range"
+          min={5}
+          max={400}
+          step={5}
+          value={config.baseMs}
+          onChange={(e) => onChange({ ...config, baseMs: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={`Write capacity: ${config.writeCapacityRps} rps`}>
+        <input
+          type="range"
+          min={5}
+          max={300}
+          step={5}
+          value={config.writeCapacityRps}
+          onChange={(e) => onChange({ ...config, writeCapacityRps: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={`Write speed: ${config.writeBaseMs}ms`}>
+        <input
+          type="range"
+          min={5}
+          max={400}
+          step={5}
+          value={config.writeBaseMs}
+          onChange={(e) => onChange({ ...config, writeBaseMs: Number(e.target.value) })}
+        />
+      </Field>
+      <label className="flex items-center gap-2 text-xs text-ink-300">
+        <input
+          type="checkbox"
+          checked={config.indexed}
+          onChange={(e) => onChange({ ...config, indexed: e.target.checked })}
+        />
+        Indexed (faster reads, slower writes)
+      </label>
+      <Field label="Cost">
+        <span className={inputClass + ' opacity-70'}>${config.costPerHour}/hr</span>
+      </Field>
+    </>
+  )
+}
+
+function ReplicaFields({
+  config,
+  onChange,
+}: {
+  config: ReplicaConfig
+  onChange: (c: ReplicaConfig) => void
+}) {
+  return (
+    <>
+      <Field label="Replication mode">
+        <select
+          className={inputClass}
+          value={config.replicationMode}
+          onChange={(e) =>
+            onChange({ ...config, replicationMode: e.target.value as ReplicaConfig['replicationMode'] })
+          }
+        >
+          <option value="async">Async (faster, can serve stale reads)</option>
+          <option value="sync">Sync (always fresh, slower to keep up)</option>
+        </select>
+      </Field>
+      <Field label={`Read capacity: ${config.capacityRps} rps`}>
+        <input
+          type="range"
+          min={5}
+          max={300}
+          step={5}
+          value={config.capacityRps}
+          onChange={(e) => onChange({ ...config, capacityRps: Number(e.target.value) })}
+        />
+      </Field>
+      {config.replicationMode === 'async' && (
+        <>
+          <Field label={`Stale read chance: ${Math.round(config.staleReadFraction * 100)}%`}>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={Math.round(config.staleReadFraction * 100)}
+              onChange={(e) => onChange({ ...config, staleReadFraction: Number(e.target.value) / 100 })}
+            />
+          </Field>
+          <Field label={`Replication lag: ${config.replicationLagMs}ms`}>
+            <input
+              type="range"
+              min={0}
+              max={2000}
+              step={50}
+              value={config.replicationLagMs}
+              onChange={(e) => onChange({ ...config, replicationLagMs: Number(e.target.value) })}
+            />
+          </Field>
+        </>
+      )}
+      <Field label="Cost">
+        <span className={inputClass + ' opacity-70'}>${config.costPerHour}/hr</span>
+      </Field>
+    </>
+  )
+}
+
+function ShardRouterFields({
+  config,
+  onChange,
+}: {
+  config: ShardRouterConfig
+  onChange: (c: ShardRouterConfig) => void
+}) {
+  return (
+    <>
+      <Field label="Routing strategy">
+        <select
+          className={inputClass}
+          value={config.strategy}
+          onChange={(e) => onChange({ ...config, strategy: e.target.value as ShardRouterConfig['strategy'] })}
+        >
+          <option value="modulo">Modulo (key % shard count)</option>
+          <option value="consistentHash">Consistent hashing</option>
+        </select>
+      </Field>
+      <Field label={`Key skew: ${config.zipfS.toFixed(1)}`}>
+        <input
+          type="range"
+          min={0}
+          max={2}
+          step={0.1}
+          value={config.zipfS}
+          onChange={(e) => onChange({ ...config, zipfS: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label="Cost">
+        <span className={inputClass + ' opacity-70'}>${config.costPerHour}/hr</span>
       </Field>
     </>
   )

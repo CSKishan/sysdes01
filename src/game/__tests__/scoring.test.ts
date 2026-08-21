@@ -15,8 +15,13 @@ function fakeResult(overrides: Partial<SimResult['aggregate']>): SimResult {
       avgCacheHitRate: null,
       staleReadRate: 0,
       availability: 1,
+      durability: 1,
       maxUtilization: 0.5,
       bottleneckNodeId: null,
+      writeP50Ms: 0,
+      writeP99Ms: 0,
+      maxShardImbalance: 1,
+      maxReplicationLagMs: 0,
       ...overrides,
     },
   }
@@ -62,5 +67,33 @@ describe('scoreRun', () => {
     const aboveTarget = fakeResult({ avgCacheHitRate: 0.9 })
     expect(scoreRun(belowTarget, { minAvgCacheHitRate: 0.7 }).passed).toBe(false)
     expect(scoreRun(aboveTarget, { minAvgCacheHitRate: 0.7 }).passed).toBe(true)
+  })
+
+  it('checks durability as a minimum threshold', () => {
+    const belowTarget = fakeResult({ durability: 0.99 })
+    const aboveTarget = fakeResult({ durability: 0.9999 })
+    expect(scoreRun(belowTarget, { minDurability: 0.999 }).passed).toBe(false)
+    expect(scoreRun(aboveTarget, { minDurability: 0.999 }).passed).toBe(true)
+  })
+
+  it('checks write p99 latency as a max threshold, independent of the combined p99', () => {
+    const slowWrites = fakeResult({ p99Ms: 50, writeP99Ms: 900 })
+    const fastWrites = fakeResult({ p99Ms: 50, writeP99Ms: 150 })
+    expect(scoreRun(slowWrites, { maxWriteP99Ms: 300 }).passed).toBe(false)
+    expect(scoreRun(fastWrites, { maxWriteP99Ms: 300 }).passed).toBe(true)
+  })
+
+  it('checks replication lag as a max threshold', () => {
+    const laggy = fakeResult({ maxReplicationLagMs: 800 })
+    const fresh = fakeResult({ maxReplicationLagMs: 50 })
+    expect(scoreRun(laggy, { maxReplicationLagMs: 200 }).passed).toBe(false)
+    expect(scoreRun(fresh, { maxReplicationLagMs: 200 }).passed).toBe(true)
+  })
+
+  it('checks shard imbalance as a max threshold', () => {
+    const hotShard = fakeResult({ maxShardImbalance: 2.5 })
+    const evenShards = fakeResult({ maxShardImbalance: 1.1 })
+    expect(scoreRun(hotShard, { maxShardImbalance: 1.5 }).passed).toBe(false)
+    expect(scoreRun(evenShards, { maxShardImbalance: 1.5 }).passed).toBe(true)
   })
 })

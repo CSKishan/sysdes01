@@ -178,5 +178,11 @@ function labelFor(kind: ComponentKind): string {
       return 'Shelf'
     case 'client':
       return 'Customers'
+    case 'database':
+      return 'Ledger'
+    case 'replica':
+      return 'Ledger copy'
+    case 'shardRouter':
+      return 'Sorting desk'
   }
 }

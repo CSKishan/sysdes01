@@ -2,7 +2,15 @@
 // canvas palette (task #6) and the engine's default configs. Keeping this in
 // one file means the UI can never drift from what the simulator understands.
 
-import type { CacheConfig, ComponentKind, LoadBalancerConfig, ServerConfig } from './types'
+import type {
+  CacheConfig,
+  ComponentKind,
+  DatabaseConfig,
+  LoadBalancerConfig,
+  ReplicaConfig,
+  ServerConfig,
+  ShardRouterConfig,
+} from './types'
 
 export interface ComponentDefinition {
   kind: ComponentKind
@@ -12,7 +20,13 @@ export interface ComponentDefinition {
   analogyName: string
   shortDescription: string
   defaultConfig: () => Exclude<
-    ServerConfig | LoadBalancerConfig | CacheConfig | { kind: 'client' },
+    | ServerConfig
+    | LoadBalancerConfig
+    | CacheConfig
+    | DatabaseConfig
+    | ReplicaConfig
+    | ShardRouterConfig
+    | { kind: 'client' },
     never
   >
 }
@@ -63,6 +77,50 @@ export const COMPONENT_REGISTRY: Record<ComponentKind, ComponentDefinition> = {
       costPerHour: 3,
       policy: 'writeThrough',
       staleFraction: 0,
+    }),
+  },
+  database: {
+    kind: 'database',
+    realName: 'Database',
+    analogyName: 'The ledger',
+    shortDescription: 'Where orders are permanently recorded, not just answered.',
+    defaultConfig: (): DatabaseConfig => ({
+      kind: 'database',
+      engine: 'sql',
+      capacityRps: 60,
+      baseMs: 40,
+      writeCapacityRps: 25,
+      writeBaseMs: 60,
+      indexed: false,
+      costPerHour: 12,
+    }),
+  },
+  replica: {
+    kind: 'replica',
+    realName: 'Read replica',
+    analogyName: 'A second copy of the ledger',
+    shortDescription: 'A read-only copy of the ledger, kept close for reads.',
+    defaultConfig: (): ReplicaConfig => ({
+      kind: 'replica',
+      capacityRps: 60,
+      baseMs: 40,
+      costPerHour: 10,
+      replicationMode: 'async',
+      staleReadFraction: 0.1,
+      replicationLagMs: 150,
+    }),
+  },
+  shardRouter: {
+    kind: 'shardRouter',
+    realName: 'Shard router',
+    analogyName: 'The regional sorting desk',
+    shortDescription: 'Sends each order to the ledger that owns its key.',
+    defaultConfig: (): ShardRouterConfig => ({
+      kind: 'shardRouter',
+      strategy: 'modulo',
+      keyspaceSize: 1000,
+      zipfS: 1.1,
+      costPerHour: 4,
     }),
   },
 }

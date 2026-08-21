@@ -67,6 +67,16 @@ export interface SloTarget {
   minThroughputRps?: number
   /** Minimum estimated system uptime, 0..1 (see computeSystemAvailability). */
   minAvailability?: number
+  /** Minimum estimated write durability, 0..1 (see computeSystemDurability). */
+  minDurability?: number
+  /** p99 latency of write-opType traffic only -- only meaningful once
+   * Workload.writeFraction > 0. */
+  maxWriteP99Ms?: number
+  /** Max authored replicationLagMs among the graph's async replica nodes. */
+  maxReplicationLagMs?: number
+  /** How lopsided the busiest shard's traffic is vs. an even split (1 =
+   * perfectly even). Only meaningful once the graph has a shardRouter. */
+  maxShardImbalance?: number
 }
 
 export interface DebriefContent {

@@ -3,7 +3,7 @@
 // React-based icon set (lucide-react) lives here instead, keyed by the
 // same ComponentKind the engine already uses.
 
-import { Users, Server, Waypoints, Database, type LucideIcon } from 'lucide-react'
+import { Users, Server, Waypoints, Database, Copy, Split, type LucideIcon } from 'lucide-react'
 import type { ComponentKind } from '@/engine/types'
 
 export const COMPONENT_ICONS: Record<ComponentKind, LucideIcon> = {
@@ -11,4 +11,7 @@ export const COMPONENT_ICONS: Record<ComponentKind, LucideIcon> = {
   server: Server,
   loadBalancer: Waypoints,
   cache: Database,
+  database: Database,
+  replica: Copy,
+  shardRouter: Split,
 }
