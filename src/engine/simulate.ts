@@ -138,34 +138,52 @@ function incomingRps(segments: Segment[] | undefined): number {
   return segments.reduce((acc, s) => acc + s.rps, 0)
 }
 
+/** Accumulates errored rps from settleSegment calls for one node's traffic
+ * this tick. A required (not optional/return-value) parameter so a call
+ * site that forgets to wire it up is a compile error, not a silently
+ * discarded number -- the exact failure mode that let three node kinds'
+ * own nodeTicks.errorRps under-report a partition while the tick-wide
+ * aggregate stayed correct. */
+interface SettleStats {
+  errorRps: number
+}
+
 /** The one shared shape behind every node kind that can terminate or
  * forward a segment (server, database, replica, cache, shard router dead-
  * ends): apply survival/latency, then either land it in this tick's
- * terminated set (recording it as a completed write too, if it is one) or
- * fan it out across whatever it's wired to next. Pulled out once these
- * five near-identical copies started needing independent auditing to
- * confirm each one was still correct. */
+ * terminated set (recording it as a completed write too, if it is one),
+ * fan it out across whatever it's wired to next, or -- if `partitionedOff`
+ * -- add it to `stats.errorRps` instead of doing either. See
+ * `partitionedOff` in the tick loop for why a partition cutoff isn't the
+ * same as a legitimate dead end. */
 function settleSegment(
   seg: Segment,
   survivingFraction: number,
   addedLatencyMs: number,
   outEdges: GraphEdge[],
+  partitionedOff: boolean,
   arrivals: Map<string, Segment[]>,
   terminatedThisTick: WeightedSample[],
   allTerminatedWrites: WeightedSample[],
+  stats: SettleStats,
 ): void {
   const survivingRps = seg.rps * survivingFraction
   if (survivingRps <= EPS) return
-  const newSeg: Segment = { ...seg, rps: survivingRps, latencyMs: seg.latencyMs + addedLatencyMs }
   if (outEdges.length === 0) {
-    terminatedThisTick.push({ value: newSeg.latencyMs, weight: newSeg.rps })
-    if (newSeg.opType === 'write') allTerminatedWrites.push({ value: newSeg.latencyMs, weight: newSeg.rps })
-  } else {
-    for (const edge of outEdges) {
-      const list = arrivals.get(edge.target) ?? []
-      list.push(newSeg)
-      arrivals.set(edge.target, list)
+    if (partitionedOff) {
+      stats.errorRps += survivingRps
+      return
     }
+    const latencyMs = seg.latencyMs + addedLatencyMs
+    terminatedThisTick.push({ value: latencyMs, weight: survivingRps })
+    if (seg.opType === 'write') allTerminatedWrites.push({ value: latencyMs, weight: survivingRps })
+    return
+  }
+  const newSeg: Segment = { ...seg, rps: survivingRps, latencyMs: seg.latencyMs + addedLatencyMs }
+  for (const edge of outEdges) {
+    const list = arrivals.get(edge.target) ?? []
+    list.push(newSeg)
+    arrivals.set(edge.target, list)
   }
 }
 
@@ -290,8 +308,22 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
       const incoming = arrivals.get(nodeId)
       const totalInbound = incomingRps(incoming)
       const outEdges = activeOutgoingEdges(graph, nodeId, severedEdgeIds)
+      // A node that normally has somewhere to send traffic, but every one
+      // of those edges is severed by an active partition incident this
+      // tick, is cut off -- distinct from a node that was simply never
+      // wired any further (a legitimate dead end, which still completes
+      // successfully). Traffic that can't cross a partition has to count
+      // as dropped, not silently vanish from the tick's accounting and not
+      // silently "succeed" by terminating early at the cut-off node.
+      const hasStaticOutEdges = graph.edges.some((e) => e.source === nodeId)
+      const partitionedOff = hasStaticOutEdges && outEdges.length === 0
 
       if (node.config.kind === 'client') {
+        if (partitionedOff) {
+          errorRpsThisTick += totalInbound
+          nodeTicks.push({ nodeId, tMs, inboundRps: totalInbound, utilization: 0, serviceMs: 0, errorRps: totalInbound })
+          continue
+        }
         for (const edge of outEdges) {
           const list = arrivals.get(edge.target) ?? []
           list.push(...(incoming ?? []))
@@ -318,9 +350,21 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
 
         errorRpsThisTick += errorRps
 
+        const settleStats: SettleStats = { errorRps: 0 }
         for (const seg of incoming ?? []) {
-          settleSegment(seg, survivingFraction, serviceMs, outEdges, arrivals, terminatedThisTick, allTerminatedWrites)
+          settleSegment(
+            seg,
+            survivingFraction,
+            serviceMs,
+            outEdges,
+            partitionedOff,
+            arrivals,
+            terminatedThisTick,
+            allTerminatedWrites,
+            settleStats,
+          )
         }
+        errorRpsThisTick += settleStats.errorRps
 
         const stats = utilizationByNode.get(nodeId) ?? { sum: 0, max: 0, count: 0 }
         stats.sum += utilization
@@ -328,7 +372,7 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
         stats.count += 1
         utilizationByNode.set(nodeId, stats)
 
-        nodeTicks.push({ nodeId, tMs, inboundRps: totalInbound, utilization, serviceMs, errorRps })
+        nodeTicks.push({ nodeId, tMs, inboundRps: totalInbound, utilization, serviceMs, errorRps: errorRps + settleStats.errorRps })
         continue
       }
 
@@ -356,12 +400,34 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
 
         errorRpsThisTick += readErrorRps + writeErrorRps
 
+        const settleStats: SettleStats = { errorRps: 0 }
         for (const seg of reads) {
-          settleSegment(seg, readSurviving, readServiceMs, outEdges, arrivals, terminatedThisTick, allTerminatedWrites)
+          settleSegment(
+            seg,
+            readSurviving,
+            readServiceMs,
+            outEdges,
+            partitionedOff,
+            arrivals,
+            terminatedThisTick,
+            allTerminatedWrites,
+            settleStats,
+          )
         }
         for (const seg of writes) {
-          settleSegment(seg, writeSurviving, writeServiceMs, outEdges, arrivals, terminatedThisTick, allTerminatedWrites)
+          settleSegment(
+            seg,
+            writeSurviving,
+            writeServiceMs,
+            outEdges,
+            partitionedOff,
+            arrivals,
+            terminatedThisTick,
+            allTerminatedWrites,
+            settleStats,
+          )
         }
+        errorRpsThisTick += settleStats.errorRps
 
         const utilization = Math.max(readUtilization, writeUtilization)
         const stats = utilizationByNode.get(nodeId) ?? { sum: 0, max: 0, count: 0 }
@@ -376,7 +442,7 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
           inboundRps: totalInbound,
           utilization,
           serviceMs: Math.max(readServiceMs, writeServiceMs),
-          errorRps: readErrorRps + writeErrorRps,
+          errorRps: readErrorRps + writeErrorRps + settleStats.errorRps,
         })
         continue
       }
@@ -414,9 +480,32 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
         // Writes don't belong on a read replica -- pass straight through to
         // whatever it's wired to next (the primary) -- unless the replica
         // itself is down, in which case there's nothing to pass through.
+        // Under sync replication, a write also has to wait for this
+        // replica to acknowledge it before it's considered done -- the
+        // real cost traded for never serving a stale read.
+        // The real cost of synchronous replication: a write can't be
+        // acknowledged until the replica confirms it has the data too, not
+        // just the primary. Without this, sync mode would look strictly
+        // better than async with no downside, which isn't the lesson --
+        // author-tunable via cfg.syncAckWaitMs (e.g. a cross-region sync
+        // replica can be given a much higher round-trip cost than a
+        // same-region one).
+        const writePassThroughMs = cfg.replicationMode === 'sync' ? PASS_THROUGH_MS + cfg.syncAckWaitMs : PASS_THROUGH_MS
+        const settleStats: SettleStats = { errorRps: 0 }
         for (const seg of killed ? [] : writes) {
-          settleSegment(seg, 1, PASS_THROUGH_MS, outEdges, arrivals, terminatedThisTick, allTerminatedWrites)
+          settleSegment(
+            seg,
+            1,
+            writePassThroughMs,
+            outEdges,
+            partitionedOff,
+            arrivals,
+            terminatedThisTick,
+            allTerminatedWrites,
+            settleStats,
+          )
         }
+        errorRpsThisTick += settleStats.errorRps
 
         const stats = utilizationByNode.get(nodeId) ?? { sum: 0, max: 0, count: 0 }
         stats.sum += utilization
@@ -430,13 +519,27 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
           inboundRps: totalInbound,
           utilization,
           serviceMs,
-          errorRps: errorRps + writeErrorRps,
+          errorRps: errorRps + writeErrorRps + settleStats.errorRps,
         })
         continue
       }
 
       if (node.config.kind === 'loadBalancer') {
         const cfg = node.config as LoadBalancerConfig
+
+        if (partitionedOff) {
+          errorRpsThisTick += totalInbound
+          nodeTicks.push({
+            nodeId,
+            tMs,
+            inboundRps: totalInbound,
+            utilization: 0,
+            serviceMs: PASS_THROUGH_MS,
+            errorRps: totalInbound,
+          })
+          continue
+        }
+
         const targets = outEdges.map((e) => nodeById.get(e.target)!).filter(Boolean)
         const weights = loadBalancerWeights(cfg.algorithm, targets)
 
@@ -483,28 +586,55 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
         if (outEdges.length === 0) {
           // No shards wired yet (e.g. mid-build): terminate here rather
           // than silently dropping the traffic from the tick's accounting,
-          // matching every other node kind's dead-end behavior.
+          // matching every other node kind's dead-end behavior. Unless
+          // this "no edges" is actually a partition cutting off shards
+          // that ARE normally wired -- settleSegment tells those apart.
+          const settleStats: SettleStats = { errorRps: 0 }
           for (const seg of incoming ?? []) {
-            settleSegment(seg, 1, PASS_THROUGH_MS, outEdges, arrivals, terminatedThisTick, allTerminatedWrites)
+            settleSegment(
+              seg,
+              1,
+              PASS_THROUGH_MS,
+              outEdges,
+              partitionedOff,
+              arrivals,
+              terminatedThisTick,
+              allTerminatedWrites,
+              settleStats,
+            )
           }
+          errorRpsThisTick += settleStats.errorRps
           nodeTicks.push({
             nodeId,
             tMs,
             inboundRps: totalInbound,
             utilization: 0,
             serviceMs: PASS_THROUGH_MS,
-            errorRps: 0,
+            errorRps: settleStats.errorRps,
           })
           continue
         }
 
-        const targets = outEdges.map((e) => nodeById.get(e.target)!).filter(Boolean)
-        const weights = shardRoutingWeights(cfg, targets.length)
+        // Weights are computed over every shard this router is WIRED to,
+        // not just the ones currently reachable -- a shard's key-range
+        // ownership doesn't change just because a partition cut it off
+        // this tick. A severed shard's own share of traffic errors out
+        // below instead of being silently redistributed onto its
+        // neighbors, which would otherwise look like keys teleporting to
+        // a shard that never owned them.
+        const staticEdges = graph.edges.filter((e) => e.source === nodeId)
+        const staticTargets = staticEdges.map((e) => nodeById.get(e.target)!).filter(Boolean)
+        const weights = shardRoutingWeights(cfg, staticTargets.length)
 
         const childStats = shardChildStats.get(nodeId) ?? new Map<string, { sum: number; count: number }>()
-        outEdges.forEach((edge, i) => {
+        let shardPartitionErrorRps = 0
+        staticEdges.forEach((edge, i) => {
           const weight = weights[i] ?? 0
           const childInbound = totalInbound * weight
+          if (severedEdgeIds.has(edge.id)) {
+            shardPartitionErrorRps += childInbound
+            return
+          }
           for (const seg of incoming ?? []) {
             const list = arrivals.get(edge.target) ?? []
             list.push({ ...seg, rps: seg.rps * weight, latencyMs: seg.latencyMs + PASS_THROUGH_MS })
@@ -516,6 +646,7 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
           childStats.set(edge.target, entry)
         })
         shardChildStats.set(nodeId, childStats)
+        errorRpsThisTick += shardPartitionErrorRps
 
         nodeTicks.push({
           nodeId,
@@ -523,7 +654,7 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
           inboundRps: totalInbound,
           utilization: 0,
           serviceMs: PASS_THROUGH_MS,
-          errorRps: 0,
+          errorRps: shardPartitionErrorRps,
         })
         continue
       }
@@ -535,6 +666,7 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
 
         const reads = (incoming ?? []).filter((s) => s.opType === 'read')
         const writes = (incoming ?? []).filter((s) => s.opType === 'write')
+        const settleStats: SettleStats = { errorRps: 0 }
 
         for (const seg of reads) {
           const hitRps = seg.rps * hitRate
@@ -554,9 +686,11 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
               1,
               cfg.missOverheadMs,
               outEdges,
+              partitionedOff,
               arrivals,
               terminatedThisTick,
               allTerminatedWrites,
+              settleStats,
             )
           }
         }
@@ -564,8 +698,19 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
         // A cache is never the source of truth: writes always pass through
         // to whatever's wired next, never resolved as a "hit" here.
         for (const seg of writes) {
-          settleSegment(seg, 1, cfg.missOverheadMs, outEdges, arrivals, terminatedThisTick, allTerminatedWrites)
+          settleSegment(
+            seg,
+            1,
+            cfg.missOverheadMs,
+            outEdges,
+            partitionedOff,
+            arrivals,
+            terminatedThisTick,
+            allTerminatedWrites,
+            settleStats,
+          )
         }
+        errorRpsThisTick += settleStats.errorRps
 
         if (incomingRps(reads) > EPS) {
           cacheHitSamples.push({ value: hitRate, weight: incomingRps(reads) })
@@ -577,7 +722,7 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
           inboundRps: totalInbound,
           utilization: hitRate,
           serviceMs: cfg.hitMs,
-          errorRps: 0,
+          errorRps: settleStats.errorRps,
           cacheHitRate: hitRate,
         })
         continue

@@ -307,6 +307,18 @@ function ReplicaFields({
           </Field>
         </>
       )}
+      {config.replicationMode === 'sync' && (
+        <Field label={`Ack wait: ${config.syncAckWaitMs}ms`}>
+          <input
+            type="range"
+            min={0}
+            max={300}
+            step={10}
+            value={config.syncAckWaitMs}
+            onChange={(e) => onChange({ ...config, syncAckWaitMs: Number(e.target.value) })}
+          />
+        </Field>
+      )}
       <Field label="Cost">
         <span className={inputClass + ' opacity-70'}>${config.costPerHour}/hr</span>
       </Field>

@@ -114,6 +114,13 @@ export interface ReplicaConfig {
    * affect service time -- it feeds the maxReplicationLagMs SLO. Forced to
    * 0 under 'sync' (a sync replica is, by definition, caught up). */
   replicationLagMs: number
+  /** Sync only: how long a write has to wait for this replica to
+   * acknowledge it before it's considered done -- the real cost traded for
+   * never serving a stale read. Author-tunable like every other latency
+   * knob in the engine, so e.g. a cross-region sync replica can be given a
+   * much higher round-trip cost than a same-region one. Ignored under
+   * 'async' (nothing to wait for). */
+  syncAckWaitMs: number
 }
 
 export interface ShardRouterConfig {

@@ -6,12 +6,9 @@
 // first level to surface computeSystemAvailability end to end).
 
 import type { Level } from './types'
-import type { GraphEdge, GraphNode, SimGraph } from '@/engine/types'
+import type { GraphNode, SimGraph } from '@/engine/types'
 import { constantTraffic } from '@/engine/traffic'
-
-function client(id = 'client', x = 60, y = 160): GraphNode {
-  return { id, label: 'Customers', config: { kind: 'client' }, position: { x, y } }
-}
+import { client, edge } from './graphHelpers'
 
 function server(
   id: string,
@@ -32,10 +29,6 @@ function server(
       availability: overrides.availability,
     },
   }
-}
-
-function edge(source: string, target: string): GraphEdge {
-  return { id: `${source}=>${target}`, source, target }
 }
 
 // ---------------------------------------------------------------------------

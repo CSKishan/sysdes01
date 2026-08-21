@@ -51,6 +51,7 @@ function replica(id: string, overrides: Partial<ReplicaConfig> = {}): GraphNode 
     replicationMode: 'async',
     staleReadFraction: 0.2,
     replicationLagMs: 150,
+    syncAckWaitMs: 40,
     ...overrides,
   }
   return { id, label: id, config, position: { x: 0, y: 0 } }
@@ -151,6 +152,16 @@ describe('replica primitive', () => {
     const primaryTicks = result.nodeTicks.filter((t) => t.nodeId === 'primary')
     expect(primaryTicks.some((t) => t.inboundRps > 0)).toBe(true)
     expect(result.aggregate.throughputRps).toBeGreaterThan(15)
+  })
+
+  it('sync replication adds real write latency (the cost traded for never serving stale reads) vs. async', () => {
+    const baseGraph = (mode: 'sync' | 'async'): SimGraph => ({
+      nodes: [client(), replica('r1', { replicationMode: mode }), server('primary', { capacityRps: 200, baseMs: 10 })],
+      edges: [edge('client', 'r1'), edge('r1', 'primary')],
+    })
+    const syncResult = runSimulation({ graph: baseGraph('sync'), workload: workload(10, { writeFraction: 1, durationMs: 1000 }) })
+    const asyncResult = runSimulation({ graph: baseGraph('async'), workload: workload(10, { writeFraction: 1, durationMs: 1000 }) })
+    expect(syncResult.aggregate.writeP99Ms).toBeGreaterThan(asyncResult.aggregate.writeP99Ms)
   })
 
   it('maxReplicationLagMs reflects an async replica but ignores a sync one', () => {
@@ -281,6 +292,120 @@ describe('severed-edge incidents (network partition)', () => {
     const outsideIncident = result.ticks.filter((t) => t.tMs < 1000 || t.tMs >= 2000)
     expect(duringIncident.every((t) => t.completedRps === 0)).toBe(true)
     expect(outsideIncident.some((t) => t.completedRps > 0)).toBe(true)
+  })
+
+  it('traffic cut off by a severed edge counts as an error, not a silent drop or a false success', () => {
+    // client -> replica -> primary, sever the replica->primary edge so
+    // writes have nowhere to go. Before the partitionedOff fix, this
+    // traffic would either vanish from all accounting (client's own edge
+    // severed) or be wrongly marked "completed" at the cut-off node
+    // (server/database/replica/cache's old outEdges.length===0 fallback).
+    const graph: SimGraph = {
+      nodes: [client(), replica('r1'), server('primary', { capacityRps: 200 })],
+      edges: [edge('client', 'r1'), edge('r1', 'primary')],
+    }
+    const result = runSimulation({
+      graph,
+      workload: workload(20, { writeFraction: 1, durationMs: 2000, tickMs: 250 }),
+      incidents: [{ id: 'partition', label: 'Partition', startMs: 0, endMs: 2000, severedEdgeIds: ['r1=>primary'] }],
+    })
+    expect(result.aggregate.errorRate).toBeCloseTo(1, 2)
+    expect(result.aggregate.throughputRps).toBeCloseTo(0, 1)
+  })
+
+  it('a client whose only edge is severed errors out instead of vanishing from the tick entirely', () => {
+    const graph: SimGraph = { nodes: [client(), server('s1', { capacityRps: 200 })], edges: [edge('client', 's1')] }
+    const result = runSimulation({
+      graph,
+      workload: workload(30, { durationMs: 1000 }),
+      incidents: [{ id: 'partition', label: 'Partition', startMs: 0, endMs: 1000, severedEdgeIds: ['client=>s1'] }],
+    })
+    expect(result.aggregate.errorRate).toBeCloseTo(1, 2)
+    expect(result.ticks.every((t) => t.errorRps > 0)).toBe(true)
+  })
+
+  it('a genuine dead end (never wired further, no incident involved) still completes successfully', () => {
+    const graph: SimGraph = { nodes: [client(), server('s1', { capacityRps: 200 })], edges: [edge('client', 's1')] }
+    const result = runSimulation({ graph, workload: workload(30, { durationMs: 1000 }) })
+    expect(result.aggregate.errorRate).toBe(0)
+    expect(result.aggregate.throughputRps).toBeGreaterThan(25)
+  })
+
+  it('the cut-off node itself reports the partition error in its own nodeTicks, not just the tick aggregate', () => {
+    // A mid-graph server whose only outgoing edge is severed: under
+    // capacity, so its own capacity-based errorRps is 0 -- the partition
+    // error only shows up via settleSegment's return value. Before this
+    // fix, that value was folded into errorRpsThisTick but never into this
+    // node's own nodeTicks entry, so a per-node view (e.g. the live
+    // Sandbox dashboard) would show it as healthy while it silently
+    // dropped 100% of its traffic.
+    const graph: SimGraph = {
+      nodes: [client(), server('mid', { capacityRps: 200 }), server('primary', { capacityRps: 200 })],
+      edges: [edge('client', 'mid'), edge('mid', 'primary')],
+    }
+    const result = runSimulation({
+      graph,
+      workload: workload(20, { durationMs: 1000, tickMs: 250 }),
+      incidents: [{ id: 'partition', label: 'Partition', startMs: 0, endMs: 1000, severedEdgeIds: ['mid=>primary'] }],
+    })
+    const midTicks = result.nodeTicks.filter((t) => t.nodeId === 'mid')
+    expect(midTicks.every((t) => t.errorRps > 0)).toBe(true)
+  })
+
+  it('a database and a replica also report the partition error in their own nodeTicks', () => {
+    const dbGraph: SimGraph = {
+      nodes: [client(), database('db1', { capacityRps: 200, writeCapacityRps: 100 }), server('downstream', { capacityRps: 200 })],
+      edges: [edge('client', 'db1'), edge('db1', 'downstream')],
+    }
+    const dbResult = runSimulation({
+      graph: dbGraph,
+      workload: workload(20, { writeFraction: 0.5, durationMs: 1000, tickMs: 250 }),
+      incidents: [{ id: 'partition', label: 'Partition', startMs: 0, endMs: 1000, severedEdgeIds: ['db1=>downstream'] }],
+    })
+    const dbTicks = dbResult.nodeTicks.filter((t) => t.nodeId === 'db1')
+    expect(dbTicks.every((t) => t.errorRps > 0)).toBe(true)
+
+    const replicaGraph: SimGraph = {
+      nodes: [client(), replica('r1'), server('primary', { capacityRps: 200 })],
+      edges: [edge('client', 'r1'), edge('r1', 'primary')],
+    }
+    const replicaResult = runSimulation({
+      graph: replicaGraph,
+      workload: workload(20, { writeFraction: 1, durationMs: 1000, tickMs: 250 }),
+      incidents: [{ id: 'partition', label: 'Partition', startMs: 0, endMs: 1000, severedEdgeIds: ['r1=>primary'] }],
+    })
+    const replicaTicks = replicaResult.nodeTicks.filter((t) => t.nodeId === 'r1')
+    expect(replicaTicks.every((t) => t.errorRps > 0)).toBe(true)
+  })
+
+  it('a shard router with only ONE of several shard edges severed errors that shard\'s share instead of silently rerouting it to survivors', () => {
+    // Before this fix: `targets`/`weights` were recomputed over just the
+    // surviving edges, so a severed shard's traffic share was silently
+    // redistributed onto whichever shards were still reachable -- as if a
+    // key's data teleported to a shard that never owned it. errorRate
+    // stayed 0 the whole time, which is a real-world impossibility for
+    // sharded data.
+    const graph: SimGraph = {
+      nodes: [
+        client(),
+        shardRouter('router', { strategy: 'modulo', zipfS: 0, keyspaceSize: 1000 }),
+        server('shard-0', { capacityRps: 500 }),
+        server('shard-1', { capacityRps: 500 }),
+      ],
+      edges: [edge('client', 'router'), edge('router', 'shard-0'), edge('router', 'shard-1')],
+    }
+    const result = runSimulation({
+      graph,
+      workload: workload(100, { durationMs: 1000, tickMs: 250 }),
+      incidents: [{ id: 'partition', label: 'Partition', startMs: 0, endMs: 1000, severedEdgeIds: ['router=>shard-0'] }],
+    })
+    // A uniform (zipfS=0) keyspace over 2 shards means shard-0 owned
+    // roughly half the traffic -- that half must now show as errored,
+    // not silently land on shard-1.
+    expect(result.aggregate.errorRate).toBeGreaterThan(0.3)
+    expect(result.aggregate.errorRate).toBeLessThan(0.7)
+    const shard1Ticks = result.nodeTicks.filter((t) => t.nodeId === 'shard-1')
+    expect(shard1Ticks.every((t) => t.inboundRps < 70)).toBe(true)
   })
 })
 

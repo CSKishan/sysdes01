@@ -108,6 +108,7 @@ export const COMPONENT_REGISTRY: Record<ComponentKind, ComponentDefinition> = {
       replicationMode: 'async',
       staleReadFraction: 0.1,
       replicationLagMs: 150,
+      syncAckWaitMs: 40,
     }),
   },
   shardRouter: {

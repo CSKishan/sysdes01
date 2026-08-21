@@ -3,12 +3,9 @@
 // algorithms, and caching (with its invalidation twist as the capstone).
 
 import type { Chapter, Level } from './types'
-import type { GraphEdge, GraphNode, SimGraph } from '@/engine/types'
+import type { GraphNode, SimGraph } from '@/engine/types'
 import { constantTraffic, rampTraffic } from '@/engine/traffic'
-
-function client(id = 'client', x = 60, y = 160): GraphNode {
-  return { id, label: 'Customers', config: { kind: 'client' }, position: { x, y } }
-}
+import { client, edge } from './graphHelpers'
 
 function server(
   id: string,
@@ -69,10 +66,6 @@ function cacheNode(
       staleFraction: overrides.staleFraction ?? 0,
     },
   }
-}
-
-function edge(source: string, target: string): GraphEdge {
-  return { id: `${source}=>${target}`, source, target }
 }
 
 // ---------------------------------------------------------------------------
