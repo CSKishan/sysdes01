@@ -25,6 +25,13 @@ export const useJournalStore = create<JournalState>()(
         })),
       clear: () => set({ entries: [] }),
     }),
-    { name: 'packet-and-post.journal' },
+    {
+      name: 'packet-and-post.journal',
+      // See progressStore.ts for why both `version` and `migrate` are
+      // required together -- without `migrate`, this discards every
+      // existing player's journal instead of preserving it.
+      version: 1,
+      migrate: (persisted) => persisted as JournalState,
+    },
   ),
 )

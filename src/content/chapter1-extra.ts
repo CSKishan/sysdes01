@@ -681,6 +681,116 @@ const ch1Availability: Level = {
   ],
 }
 
+// ---------------------------------------------------------------------------
+// Scalability (build stage -- the capstone: a single server's capacity
+// slider physically caps out at 300rps, so this is the one level where
+// vertical scaling can't be argued around. It has to go horizontal.)
+// ---------------------------------------------------------------------------
+
+const scalabilityStartGraph: SimGraph = {
+  nodes: [client(), server('megadepot', 'Depot (maxed out)', 320, 160, { capacityRps: 300, baseMs: 80 })],
+  edges: [edge('client', 'megadepot')],
+}
+
+const ch1Scalability: Level = {
+  id: 'ch1-scalability',
+  chapterId: 'ch1',
+  order: 15,
+  title: 'The Real Ceiling',
+  realConcept: 'Scalability',
+  analogyName: "There's no bigger depot to build",
+  stages: [
+    {
+      kind: 'situation',
+      title: 'You maxed it out',
+      body: [
+        "You've upgraded this depot every time it struggled, and it's now as big as a single depot can physically get. Demand just grew past what even that can handle. There is no bigger single depot to build.",
+      ],
+    },
+    {
+      kind: 'teach',
+      title: 'Scalability, put plainly',
+      body: [
+        '**Scalability** is how well a system responds to more demand by adding resources. You\'ve actually been practicing it since Level 2 — this is just the moment it gets a name and its two strategies get compared directly.',
+        '**Vertical scaling** (make the existing machine bigger) is simple and keeps data in one place, but it has a hard ceiling, and that one machine stays a single point of failure the whole way. **Horizontal scaling** (add more machines) has no such ceiling and survives one machine dying — at the cost of needing something to coordinate them, which by now you already know how to build.',
+        "The rule of thumb: reach for vertical scaling first, because it's cheap and simple. Reach for horizontal scaling the moment you hit a ceiling — a maximum machine size, a single-point-of-failure requirement, or a bill that's growing faster than your traffic is.",
+      ],
+      diagram: {
+        steps: [
+          { icon: '🏬', label: 'One depot, maxed' },
+          { icon: '🧭', label: 'Dispatcher' },
+          { icon: '🏬', label: 'Depot A' },
+          { icon: '🏬', label: 'Depot B' },
+        ],
+        caption: 'Past the ceiling, the only way up is out.',
+      },
+      readmeQuote: {
+        text: 'Scalability is the measure of how well a system responds to changes by adding or removing resources to meet demands.',
+        source: 'Chapter I · Scalability',
+      },
+      realWorldExamples: [
+        'A database maxed out on the largest instance size a cloud provider offers',
+        'A service adding pods/replicas instead of a bigger single instance',
+      ],
+      check: {
+        question: "A server is already running the largest machine size your cloud provider sells, and it's still not enough. What's the only scaling option left?",
+        options: [
+          { id: 'a', label: 'Horizontal scaling — add more machines', correct: true, feedback: "Right — once vertical scaling hits a hard ceiling, adding more machines is the only way to add more capacity." },
+          { id: 'b', label: 'Keep vertically scaling the same machine', correct: false, feedback: "That's exactly the ceiling — there's no bigger machine left to move to." },
+          { id: 'c', label: 'Lower the traffic', correct: false, feedback: "That avoids the problem rather than solving it, and usually isn't something you control." },
+        ],
+      },
+    },
+    {
+      kind: 'build',
+      mode: 'solo',
+      title: 'Past the ceiling',
+      brief: [
+        "This depot is maxed at its capacity slider's ceiling and demand still exceeds it. Delete the direct wire from Customers, then add a Dispatcher and a second Depot alongside it — and make sure the new depot's capacity is actually turned up enough to share the load, not left at its default.",
+      ],
+      startingGraph: scalabilityStartGraph,
+      unlockedKinds: ['client', 'server', 'loadBalancer'],
+      lockedNodeIds: ['megadepot'],
+      workload: { durationMs: 6000, tickMs: 250, trafficCurve: constantTraffic(320) },
+      slo: { maxP99Ms: 300, maxErrorRate: 0.01, minThroughputRps: 300 },
+      debrief: {
+        successBody: [
+          "Vertical scaling got you this far and no further — the depot was already at its ceiling before you even opened this level. Adding a second depot behind a dispatcher is the only move left, and it has no ceiling like this one did.",
+          "Notice this cost more than just turning a slider: a new depot, a dispatcher, and now two things that need to be sized correctly instead of one.",
+        ],
+        failureBody: [
+          "Make sure the direct Customers→Depot wire is gone, both depots run through the Dispatcher, and the new depot's own capacity slider is turned up — its default is much too small to share this much traffic.",
+        ],
+        readmeQuote: {
+          text: 'Horizontal scaling (also known as scaling out) expands a system\'s scale by adding more machines... Increased redundancy, better fault tolerance, flexible and efficient.',
+          source: 'Chapter I · Scalability',
+        },
+        realWorldExamples: ['A service migrating from one large database instance to a sharded/replicated fleet'],
+        interviewPhrase: '"I\'d scale vertically first since it\'s simple, but I\'d design for horizontal scaling from the start, because vertical scaling always has a ceiling."',
+        ruleOfThumb: 'Vertical scaling buys time. Horizontal scaling is what you fall back to once time runs out.',
+      },
+    },
+  ],
+  quizQuestions: [
+    {
+      id: 'q1',
+      question: 'Which is a genuine disadvantage of vertical scaling that horizontal scaling doesn\'t share?',
+      options: [
+        { id: 'a', label: 'It has a hard ceiling, and the one machine stays a single point of failure', correct: true, feedback: 'Right — straight from the trade-off table.' },
+        { id: 'b', label: 'It is always more expensive per unit of capacity', correct: false, feedback: 'Not universally true — vertical scaling is often the cheaper, simpler option below the ceiling.' },
+      ],
+    },
+    {
+      id: 'q2',
+      question: 'What specifically forces a move from vertical to horizontal scaling in this level?',
+      options: [
+        { id: 'a', label: "The single server is already at its maximum possible capacity", correct: true, feedback: "Right — there's no larger single machine left to move to." },
+        { id: 'b', label: 'The dispatcher stopped working', correct: false, feedback: "There was no dispatcher yet — the single depot itself hit its ceiling." },
+      ],
+    },
+  ],
+}
+
 export const CHAPTER_1_EXTRA_LEVELS: Level[] = [
   ch1NetIp,
   ch1NetOsi,
@@ -691,4 +801,5 @@ export const CHAPTER_1_EXTRA_LEVELS: Level[] = [
   ch1Storage,
   ch1Cdn,
   ch1Availability,
+  ch1Scalability,
 ]

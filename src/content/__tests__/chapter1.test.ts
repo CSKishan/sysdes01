@@ -253,3 +253,44 @@ describe('ch1-availability: The Contract', () => {
   })
 })
 
+describe('ch1-scalability: The Real Ceiling', () => {
+  const level = findLevel('ch1-scalability')
+  const stage = level.stages.find((s) => s.kind === 'build')!
+  if (stage.kind !== 'build') throw new Error('expected a build stage')
+
+  it('the single maxed-out depot (300rps cap) cannot absorb 320rps demand', () => {
+    const result = runSimulation({ graph: stage.startingGraph, workload: stage.workload })
+    const score = scoreRun(result, stage.slo)
+    expect(score.passed).toBe(false)
+    expect(result.aggregate.errorRate).toBeGreaterThan(stage.slo.maxErrorRate!)
+  })
+
+  it('adding a second depot at default capacity (50rps) still fails -- sizing matters, not just topology', () => {
+    const solved: SimGraph = {
+      nodes: [
+        ...stage.startingGraph.nodes,
+        { id: 'dispatcher', label: 'Dispatcher', position: { x: 0, y: 0 }, config: { kind: 'loadBalancer', algorithm: 'roundRobin', costPerHour: 4 } },
+        { id: 'depot-2', label: 'Depot 2', position: { x: 0, y: 0 }, config: { kind: 'server', capacityRps: 50, baseMs: 80, costPerHour: 8 } },
+      ],
+      edges: [edge('client', 'dispatcher'), edge('dispatcher', 'megadepot'), edge('dispatcher', 'depot-2')],
+    }
+    const result = runSimulation({ graph: solved, workload: stage.workload })
+    const score = scoreRun(result, stage.slo)
+    expect(score.passed).toBe(false)
+  })
+
+  it('the intended solution (dispatcher + a properly-sized second depot) clears the ceiling', () => {
+    const solved: SimGraph = {
+      nodes: [
+        ...stage.startingGraph.nodes,
+        { id: 'dispatcher', label: 'Dispatcher', position: { x: 0, y: 0 }, config: { kind: 'loadBalancer', algorithm: 'roundRobin', costPerHour: 4 } },
+        { id: 'depot-2', label: 'Depot 2', position: { x: 0, y: 0 }, config: { kind: 'server', capacityRps: 230, baseMs: 80, costPerHour: 8 } },
+      ],
+      edges: [edge('client', 'dispatcher'), edge('dispatcher', 'megadepot'), edge('dispatcher', 'depot-2')],
+    }
+    const result = runSimulation({ graph: solved, workload: stage.workload })
+    const score = scoreRun(result, stage.slo)
+    expect(score.passed).toBe(true)
+  })
+})
+

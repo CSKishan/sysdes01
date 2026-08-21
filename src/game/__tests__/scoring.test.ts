@@ -43,11 +43,18 @@ describe('scoreRun', () => {
     expect(score.stars).toBe(3)
   })
 
-  it('gives 2 stars for passing but with thin margin', () => {
-    const result = fakeResult({ p99Ms: 195 })
+  it('gives 2 stars for passing with a moderate margin', () => {
+    const result = fakeResult({ p99Ms: 160 })
     const score = scoreRun(result, { maxP99Ms: 200 })
     expect(score.passed).toBe(true)
     expect(score.stars).toBe(2)
+  })
+
+  it('gives 1 star for passing right at the edge of the SLO', () => {
+    const result = fakeResult({ p99Ms: 195 })
+    const score = scoreRun(result, { maxP99Ms: 200 })
+    expect(score.passed).toBe(true)
+    expect(score.stars).toBe(1)
   })
 
   it('checks cache hit rate as a minimum threshold', () => {

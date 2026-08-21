@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { Package, Target, BookOpen, FlaskConical, Check, Lock, Zap } from 'lucide-react'
+import { Package, Target, BookOpen, FlaskConical, Check, Lock, Zap, Settings } from 'lucide-react'
 import { CHAPTERS, getLevelsForChapter, isLevelUnlocked } from '@/content/registry'
 import { useProgressStore } from '@/game/progressStore'
 import { Panel } from '@/ui/shared/Panel'
@@ -10,11 +10,13 @@ export function ChapterMap({
   onOpenJournal,
   onOpenSandbox,
   onOpenQuiz,
+  onOpenSettings,
 }: {
   onPlayLevel: (levelId: string, challengeMode: boolean) => void
   onOpenJournal: () => void
   onOpenSandbox: () => void
   onOpenQuiz: () => void
+  onOpenSettings: () => void
 }) {
   const completedLevelIds = useProgressStore((s) => s.completedLevelIds)
   const starsByLevelId = useProgressStore((s) => s.starsByLevelId)
@@ -44,6 +46,9 @@ export function ChapterMap({
           <Button variant="secondary" onClick={onOpenSandbox}>
             <FlaskConical className="h-3.5 w-3.5" strokeWidth={1.8} />
             Sandbox
+          </Button>
+          <Button variant="ghost" onClick={onOpenSettings} aria-label="Settings">
+            <Settings className="h-3.5 w-3.5" strokeWidth={1.8} />
           </Button>
         </div>
       </header>

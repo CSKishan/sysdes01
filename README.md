@@ -13,11 +13,21 @@ verbatim passage from the source README that covers what just happened.
 
 ## Status
 
-This is **v0.1**, a vertical slice: the full engine, the five-stage teaching
-loop (situation → teach → guided build → solo build → twist), the canvas,
-live dashboard, decision journal, and Chapter 0 (5 levels) + Chapter I
-(5 levels, ending on caching and its invalidation twist), plus a free-build
-sandbox. Chapters II–V are not yet built.
+Chapter 0 (6 levels) and Chapter I (15 levels, from IP addressing through
+caching, CDN, availability, and scalability) are complete: situation → teach
+→ guided build → solo build → twist, the canvas, live dashboard, decision
+journal, quiz mode with a question bank covering every level, and a
+free-build sandbox. Routing is real (`/level/:id`, `/journal`, `/sandbox`,
+`/quiz`, `/settings`) so any screen is linkable, and progress/journal/quiz
+data can be exported and re-imported from Settings.
+
+**Chapters II–V of the source curriculum are not yet built** — databases,
+sharding and consistency (Chapter II), messaging and service architecture
+(Chapter III), resilience and security (Chapter IV), and the system design
+case studies (Chapter V). The current engine only models read traffic
+through four primitives (client, server, load balancer, cache); Chapter II
+onward needs writes, persistence, and async primitives the engine doesn't
+have yet. That work is scoped but not started.
 
 ## Running locally
 
@@ -26,7 +36,18 @@ npm install
 npm run dev        # http://localhost:5173
 npm test           # engine + content correctness tests (Vitest)
 npm run typecheck
+npm run lint        # oxlint
 npm run build       # production build to dist/
+```
+
+The `scripts/*.mjs` files are manual Playwright smoke tests (not part of
+`npm test`) that drive the real app in a browser end to end:
+
+```bash
+npx playwright install chromium   # once
+npm run dev                       # in one terminal
+node scripts/playtest.mjs         # in another, once the dev server is up
+node scripts/playtest-v02.mjs
 ```
 
 ## Architecture
@@ -38,7 +59,8 @@ src/
                # hit rates, load-balancer routing algorithms, availability
                # math straight from the source README's own formulas.
   content/     # levels as data: chapters, levels, stages, decision cards
-  game/        # zustand stores (progress, decision journal) + scoring
+  game/        # zustand stores (progress, decision journal, quiz history,
+               # display settings) + scoring
   ui/
     teach/     # lesson player + comprehension checks
     guided/    # step-by-step build narration
@@ -48,6 +70,7 @@ src/
     campaign/  # level player, chapter map
     sandbox/   # free build, no objectives
     journal/   # the player's own accumulated decision log
+    settings/  # reset/export/import progress, reduced-motion toggle
 ```
 
 The engine is the one part of this app that has to be right: every number

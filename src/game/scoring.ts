@@ -16,7 +16,7 @@ export interface SloCheck {
 
 export interface ScoreResult {
   passed: boolean
-  stars: 0 | 2 | 3
+  stars: 0 | 1 | 2 | 3
   checks: SloCheck[]
 }
 
@@ -109,7 +109,7 @@ export function scoreRun(result: SimResult, slo: SloTarget): ScoreResult {
 
   const passed = checks.every((c) => c.passed)
   const worstMargin = checks.length > 0 ? Math.min(...checks.map((c) => c.margin)) : 1
-  const stars: 0 | 2 | 3 = !passed ? 0 : worstMargin >= 0.3 ? 3 : 2
+  const stars: 0 | 1 | 2 | 3 = !passed ? 0 : worstMargin >= 0.3 ? 3 : worstMargin >= 0.15 ? 2 : 1
 
   return { passed, stars, checks }
 }
