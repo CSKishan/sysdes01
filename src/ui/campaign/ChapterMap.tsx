@@ -1,5 +1,6 @@
 import clsx from 'clsx'
-import { Package, Target, BookOpen, FlaskConical, Check, Lock, Zap, Settings } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Package, Target, BookOpen, BookMarked, FlaskConical, Check, Lock, Zap, Settings } from 'lucide-react'
 import { CHAPTERS, getLevelsForChapter, isLevelUnlocked } from '@/content/registry'
 import { useProgressStore } from '@/game/progressStore'
 import { Panel } from '@/ui/shared/Panel'
@@ -35,6 +36,13 @@ export function ChapterMap({
           </div>
         </div>
         <div className="flex gap-2">
+          <Link
+            to="/library"
+            className="inline-flex items-center gap-2 border border-ink-700 bg-ink-800 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink-200 hover:border-brand-500/50 hover:text-ink-100"
+          >
+            <BookMarked className="h-3.5 w-3.5" strokeWidth={1.8} />
+            Library
+          </Link>
           <Button variant="secondary" onClick={onOpenQuiz}>
             <Target className="h-3.5 w-3.5" strokeWidth={1.8} />
             Quiz

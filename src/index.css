@@ -122,3 +122,17 @@ body {
     transition-duration: var(--motion-kill-duration) !important;
   }
 }
+
+/* Cheat sheets (Phase 1.6) are the one view meant to leave the screen --
+   drop the dark drafting-table background and grid for a plain printable
+   page instead of forcing dark ink onto paper. Scoped to a class
+   CheatSheetPage toggles on <body> while mounted (not a bare `body`
+   selector) -- every other page's text is colored for the dark
+   background and has no print-specific override, so forcing the
+   background white globally left it illegible on print. */
+@media print {
+  body.print-cheatsheet {
+    background-image: none;
+    background-color: white;
+  }
+}

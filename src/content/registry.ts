@@ -32,3 +32,26 @@ export function isLevelUnlocked(levelId: string, completedLevelIds: string[]): b
   const previousLevelId = LEVEL_SEQUENCE[index - 1]
   return completedLevelIds.includes(previousLevelId)
 }
+
+export interface TopicNeighbors {
+  before?: Level
+  after?: Level
+  seeAlso: Level[]
+}
+
+/** Derived "before this / next / see also" for a Library topic page --
+ * from chapter order rather than a hand-authored graph, since every level
+ * already carries a chapter and a position within it. `seeAlso` is capped
+ * at 4 so it stays a quick glance, not a second nav menu. */
+export function getTopicNeighbors(levelId: string): TopicNeighbors {
+  const level = getLevel(levelId)
+  if (!level) return { seeAlso: [] }
+  const siblings = getLevelsForChapter(level.chapterId)
+  const index = siblings.findIndex((l) => l.id === levelId)
+  const seeAlso = siblings.filter((l, i) => l.id !== levelId && Math.abs(i - index) <= 2).slice(0, 4)
+  return {
+    before: index > 0 ? siblings[index - 1] : undefined,
+    after: index >= 0 && index < siblings.length - 1 ? siblings[index + 1] : undefined,
+    seeAlso,
+  }
+}

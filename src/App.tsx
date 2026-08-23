@@ -11,6 +11,12 @@ import { SandboxView } from '@/ui/sandbox/SandboxView'
 import { QuizView } from '@/ui/quiz/QuizView'
 import { SettingsView } from '@/ui/settings/SettingsView'
 import { Button } from '@/ui/shared/Button'
+import { LibraryHome } from '@/ui/library/LibraryHome'
+import { TopicPage } from '@/ui/library/TopicPage'
+import { GlossaryPage } from '@/ui/library/GlossaryPage'
+import { NumbersPage } from '@/ui/library/NumbersPage'
+import { CheatSheetPage } from '@/ui/library/CheatSheetPage'
+import { SearchPalette } from '@/ui/library/SearchPalette'
 
 function ChapterMapRoute() {
   const navigate = useNavigate()
@@ -78,6 +84,11 @@ function AppRoutes() {
       <Route path="/sandbox" element={<SandboxView onBack={() => navigate('/')} />} />
       <Route path="/quiz" element={<QuizView onBack={() => navigate('/')} />} />
       <Route path="/settings" element={<SettingsView onBack={() => navigate('/')} />} />
+      <Route path="/library" element={<LibraryHome />} />
+      <Route path="/library/topic/:levelId" element={<TopicPage />} />
+      <Route path="/library/glossary" element={<GlossaryPage />} />
+      <Route path="/library/numbers" element={<NumbersPage />} />
+      <Route path="/library/cheatsheet/:chapterId" element={<CheatSheetPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
@@ -92,6 +103,7 @@ function App() {
 
   return (
     <HashRouter>
+      <SearchPalette />
       <AppRoutes />
     </HashRouter>
   )

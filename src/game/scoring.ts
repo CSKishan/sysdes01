@@ -26,16 +26,35 @@ function marginFromRatio(ratio: number): number {
   return Math.max(0, Math.min(1, 1 - ratio))
 }
 
+/** The one source of truth for how each SLO field is labeled and how its
+ * authored target number is formatted -- shared with the Library's topic
+ * pages (which show a level's targets with no SimResult to score against),
+ * so the two can't quietly drift apart into disagreeing about what a
+ * level's own SLO says. */
+export const SLO_FIELD_FORMATS: Record<keyof SloTarget, { label: string; formatTarget: (v: number) => string }> = {
+  maxP99Ms: { label: 'p99 latency', formatTarget: (v) => `≤ ${v}ms` },
+  maxErrorRate: { label: 'Error rate', formatTarget: (v) => `≤ ${(v * 100).toFixed(1)}%` },
+  maxCostPerHour: { label: 'Cost', formatTarget: (v) => `≤ $${v}/hr` },
+  minAvgCacheHitRate: { label: 'Cache hit rate', formatTarget: (v) => `≥ ${(v * 100).toFixed(0)}%` },
+  minThroughputRps: { label: 'Throughput', formatTarget: (v) => `≥ ${v} rps` },
+  minAvailability: { label: 'Availability', formatTarget: (v) => `≥ ${(v * 100).toFixed(3)}%` },
+  maxStaleReadRate: { label: 'Stale reads', formatTarget: (v) => `≤ ${(v * 100).toFixed(1)}%` },
+  minDurability: { label: 'Durability', formatTarget: (v) => `≥ ${(v * 100).toFixed(3)}%` },
+  maxWriteP99Ms: { label: 'Write p99 latency', formatTarget: (v) => `≤ ${v}ms` },
+  maxReplicationLagMs: { label: 'Replication lag', formatTarget: (v) => `≤ ${v}ms` },
+  maxShardImbalance: { label: 'Shard imbalance', formatTarget: (v) => `≤ ${v.toFixed(2)}x` },
+}
+
 export function scoreRun(result: SimResult, slo: SloTarget): ScoreResult {
   const checks: SloCheck[] = []
 
   if (slo.maxP99Ms !== undefined) {
     const ratio = result.aggregate.p99Ms / slo.maxP99Ms
     checks.push({
-      label: 'p99 latency',
+      label: SLO_FIELD_FORMATS.maxP99Ms.label,
       passed: ratio <= 1,
       actual: `${Math.round(result.aggregate.p99Ms)}ms`,
-      target: `≤ ${slo.maxP99Ms}ms`,
+      target: SLO_FIELD_FORMATS.maxP99Ms.formatTarget(slo.maxP99Ms),
       margin: marginFromRatio(ratio),
     })
   }
@@ -43,20 +62,20 @@ export function scoreRun(result: SimResult, slo: SloTarget): ScoreResult {
     const ratio =
       slo.maxErrorRate > 0 ? result.aggregate.errorRate / slo.maxErrorRate : result.aggregate.errorRate > 0 ? Infinity : 0
     checks.push({
-      label: 'Error rate',
+      label: SLO_FIELD_FORMATS.maxErrorRate.label,
       passed: ratio <= 1,
       actual: `${(result.aggregate.errorRate * 100).toFixed(1)}%`,
-      target: `≤ ${(slo.maxErrorRate * 100).toFixed(1)}%`,
+      target: SLO_FIELD_FORMATS.maxErrorRate.formatTarget(slo.maxErrorRate),
       margin: marginFromRatio(ratio),
     })
   }
   if (slo.maxCostPerHour !== undefined) {
     const ratio = result.aggregate.costPerHour / slo.maxCostPerHour
     checks.push({
-      label: 'Cost',
+      label: SLO_FIELD_FORMATS.maxCostPerHour.label,
       passed: ratio <= 1,
       actual: `$${result.aggregate.costPerHour.toFixed(0)}/hr`,
-      target: `≤ $${slo.maxCostPerHour}/hr`,
+      target: SLO_FIELD_FORMATS.maxCostPerHour.formatTarget(slo.maxCostPerHour),
       margin: marginFromRatio(ratio),
     })
   }
@@ -64,30 +83,30 @@ export function scoreRun(result: SimResult, slo: SloTarget): ScoreResult {
     const actual = result.aggregate.avgCacheHitRate ?? 0
     const ratio = actual > 0 ? slo.minAvgCacheHitRate / actual : Infinity
     checks.push({
-      label: 'Cache hit rate',
+      label: SLO_FIELD_FORMATS.minAvgCacheHitRate.label,
       passed: actual >= slo.minAvgCacheHitRate,
       actual: `${(actual * 100).toFixed(0)}%`,
-      target: `≥ ${(slo.minAvgCacheHitRate * 100).toFixed(0)}%`,
+      target: SLO_FIELD_FORMATS.minAvgCacheHitRate.formatTarget(slo.minAvgCacheHitRate),
       margin: marginFromRatio(ratio),
     })
   }
   if (slo.minThroughputRps !== undefined) {
     const ratio = slo.minThroughputRps > 0 ? slo.minThroughputRps / Math.max(result.aggregate.throughputRps, 1e-9) : 0
     checks.push({
-      label: 'Throughput',
+      label: SLO_FIELD_FORMATS.minThroughputRps.label,
       passed: result.aggregate.throughputRps >= slo.minThroughputRps,
       actual: `${Math.round(result.aggregate.throughputRps)} rps`,
-      target: `≥ ${slo.minThroughputRps} rps`,
+      target: SLO_FIELD_FORMATS.minThroughputRps.formatTarget(slo.minThroughputRps),
       margin: marginFromRatio(ratio),
     })
   }
   if (slo.minAvailability !== undefined) {
     const ratio = result.aggregate.availability > 0 ? slo.minAvailability / result.aggregate.availability : Infinity
     checks.push({
-      label: 'Availability',
+      label: SLO_FIELD_FORMATS.minAvailability.label,
       passed: result.aggregate.availability >= slo.minAvailability,
       actual: `${(result.aggregate.availability * 100).toFixed(3)}%`,
-      target: `≥ ${(slo.minAvailability * 100).toFixed(3)}%`,
+      target: SLO_FIELD_FORMATS.minAvailability.formatTarget(slo.minAvailability),
       margin: marginFromRatio(ratio),
     })
   }
@@ -99,50 +118,50 @@ export function scoreRun(result: SimResult, slo: SloTarget): ScoreResult {
           ? Infinity
           : 0
     checks.push({
-      label: 'Stale reads',
+      label: SLO_FIELD_FORMATS.maxStaleReadRate.label,
       passed: ratio <= 1,
       actual: `${(result.aggregate.staleReadRate * 100).toFixed(1)}%`,
-      target: `≤ ${(slo.maxStaleReadRate * 100).toFixed(1)}%`,
+      target: SLO_FIELD_FORMATS.maxStaleReadRate.formatTarget(slo.maxStaleReadRate),
       margin: marginFromRatio(ratio),
     })
   }
   if (slo.minDurability !== undefined) {
     const ratio = result.aggregate.durability > 0 ? slo.minDurability / result.aggregate.durability : Infinity
     checks.push({
-      label: 'Durability',
+      label: SLO_FIELD_FORMATS.minDurability.label,
       passed: result.aggregate.durability >= slo.minDurability,
       actual: `${(result.aggregate.durability * 100).toFixed(3)}%`,
-      target: `≥ ${(slo.minDurability * 100).toFixed(3)}%`,
+      target: SLO_FIELD_FORMATS.minDurability.formatTarget(slo.minDurability),
       margin: marginFromRatio(ratio),
     })
   }
   if (slo.maxWriteP99Ms !== undefined) {
     const ratio = result.aggregate.writeP99Ms / slo.maxWriteP99Ms
     checks.push({
-      label: 'Write p99 latency',
+      label: SLO_FIELD_FORMATS.maxWriteP99Ms.label,
       passed: ratio <= 1,
       actual: `${Math.round(result.aggregate.writeP99Ms)}ms`,
-      target: `≤ ${slo.maxWriteP99Ms}ms`,
+      target: SLO_FIELD_FORMATS.maxWriteP99Ms.formatTarget(slo.maxWriteP99Ms),
       margin: marginFromRatio(ratio),
     })
   }
   if (slo.maxReplicationLagMs !== undefined) {
     const ratio = result.aggregate.maxReplicationLagMs / slo.maxReplicationLagMs
     checks.push({
-      label: 'Replication lag',
+      label: SLO_FIELD_FORMATS.maxReplicationLagMs.label,
       passed: ratio <= 1,
       actual: `${Math.round(result.aggregate.maxReplicationLagMs)}ms`,
-      target: `≤ ${slo.maxReplicationLagMs}ms`,
+      target: SLO_FIELD_FORMATS.maxReplicationLagMs.formatTarget(slo.maxReplicationLagMs),
       margin: marginFromRatio(ratio),
     })
   }
   if (slo.maxShardImbalance !== undefined) {
     const ratio = result.aggregate.maxShardImbalance / slo.maxShardImbalance
     checks.push({
-      label: 'Shard imbalance',
+      label: SLO_FIELD_FORMATS.maxShardImbalance.label,
       passed: ratio <= 1,
       actual: `${result.aggregate.maxShardImbalance.toFixed(2)}x`,
-      target: `≤ ${slo.maxShardImbalance.toFixed(2)}x`,
+      target: SLO_FIELD_FORMATS.maxShardImbalance.formatTarget(slo.maxShardImbalance),
       margin: marginFromRatio(ratio),
     })
   }
