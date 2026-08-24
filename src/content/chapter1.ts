@@ -3,12 +3,9 @@
 // algorithms, and caching (with its invalidation twist as the capstone).
 
 import type { Chapter, Level } from './types'
-import type { GraphEdge, GraphNode, SimGraph } from '@/engine/types'
+import type { GraphNode, SimGraph } from '@/engine/types'
 import { constantTraffic, rampTraffic } from '@/engine/traffic'
-
-function client(id = 'client', x = 60, y = 160): GraphNode {
-  return { id, label: 'Customers', config: { kind: 'client' }, position: { x, y } }
-}
+import { client, edge, loadBalancer } from './graphHelpers'
 
 function server(
   id: string,
@@ -27,15 +24,6 @@ function server(
       baseMs: overrides.baseMs ?? 80,
       costPerHour: overrides.costPerHour ?? 8,
     },
-  }
-}
-
-function loadBalancer(id: string, label: string, x: number, y: number): GraphNode {
-  return {
-    id,
-    label,
-    position: { x, y },
-    config: { kind: 'loadBalancer', algorithm: 'roundRobin', costPerHour: 4 },
   }
 }
 
@@ -69,10 +57,6 @@ function cacheNode(
       staleFraction: overrides.staleFraction ?? 0,
     },
   }
-}
-
-function edge(source: string, target: string): GraphEdge {
-  return { id: `${source}=>${target}`, source, target }
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +141,24 @@ const ch1Level1: Level = {
       },
     },
   ],
+  quizQuestions: [
+    {
+      id: 'q1',
+      question: 'What two things define a server\'s basic behavior in this game?',
+      options: [
+        { id: 'a', label: 'Its capacity (requests/sec it can handle) and its base speed (how long one request takes when idle)', correct: true, feedback: 'Right — those two numbers drive everything else about how it behaves under load.' },
+        { id: 'b', label: 'Its color and its position on the map', correct: false, feedback: "Those are purely cosmetic — capacity and base speed are what the simulation actually uses." },
+      ],
+    },
+    {
+      id: 'q2',
+      question: 'On the canvas, what does a wire between two components represent?',
+      options: [
+        { id: 'a', label: 'The path requests can flow along', correct: true, feedback: 'Right — no wire, no traffic flow between those two components.' },
+        { id: 'b', label: 'A billing relationship between components', correct: false, feedback: "Wires are purely about request flow, not cost or billing." },
+      ],
+    },
+  ],
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +234,24 @@ const ch1Level2: Level = {
         interviewPhrase: '"Vertical scaling buys time cheaply, but it doesn\'t solve the single-point-of-failure problem — eventually you need to scale out, not just up."',
         ruleOfThumb: 'Vertical scaling is a fast, cheap patch with a ceiling — not a permanent fix.',
       },
+    },
+  ],
+  quizQuestions: [
+    {
+      id: 'q1',
+      question: 'When incoming traffic exceeds what a server can process, what happens first, before outright errors appear?',
+      options: [
+        { id: 'a', label: 'Latency climbs as the queue backs up', correct: true, feedback: 'Right — the queue backs up before requests start getting dropped outright.' },
+        { id: 'b', label: 'The server immediately starts refusing every request', correct: false, feedback: "Errors come after the queue has already backed up, not immediately at the first sign of overload." },
+      ],
+    },
+    {
+      id: 'q2',
+      question: 'What is the main limitation of vertical scaling as a long-term fix?',
+      options: [
+        { id: 'a', label: "There's a ceiling to how big one machine can get, and it's expensive near that ceiling", correct: true, feedback: "Right — that's exactly the ceiling this level is about." },
+        { id: 'b', label: 'It requires a load balancer to work at all', correct: false, feedback: "The opposite — vertical scaling is what you do before you need a load balancer." },
+      ],
     },
   ],
 }
@@ -319,6 +339,24 @@ const ch1Level3: Level = {
       },
     },
   ],
+  quizQuestions: [
+    {
+      id: 'q1',
+      question: 'What does a load balancer add that two independent servers without one don\'t have?',
+      options: [
+        { id: 'a', label: 'Something that knows which servers exist and splits traffic between them', correct: true, feedback: 'Right — without it, traffic has no principled way to spread across the pool.' },
+        { id: 'b', label: 'Extra storage capacity', correct: false, feedback: "A load balancer routes traffic; it doesn't add storage." },
+      ],
+    },
+    {
+      id: 'q2',
+      question: 'What is the main advantage horizontal scaling has over vertical scaling?',
+      options: [
+        { id: 'a', label: 'It scales further and survives one machine dying', correct: true, feedback: 'Right — no single ceiling, and redundancy comes for free.' },
+        { id: 'b', label: "It's always simpler to set up than vertical scaling", correct: false, feedback: "It's usually more complex to set up — a load balancer and multiple machines to manage, instead of one." },
+      ],
+    },
+  ],
 }
 
 // ---------------------------------------------------------------------------
@@ -400,6 +438,24 @@ const ch1Level4: Level = {
         interviewPhrase: '"With heterogeneous server capacity, I\'d avoid plain round robin and use a weighted or least-connections strategy so load tracks actual capacity."',
         ruleOfThumb: 'Round robin assumes every server is equal. The moment that\'s untrue, it becomes the bottleneck\'s best friend.',
       },
+    },
+  ],
+  quizQuestions: [
+    {
+      id: 'q1',
+      question: 'A dispatcher always sends the same customer\'s repeat orders to the same depot. Which routing algorithm is this?',
+      options: [
+        { id: 'a', label: 'Hash-based routing', correct: true, feedback: 'Right — hash routing consistently maps the same key to the same server.' },
+        { id: 'b', label: 'Round robin', correct: false, feedback: "Round robin alternates strictly, with no memory of who went where before." },
+      ],
+    },
+    {
+      id: 'q2',
+      question: 'Why does round robin struggle once servers have different capacities?',
+      options: [
+        { id: 'a', label: 'It splits traffic evenly regardless of capacity, overloading the smaller server', correct: true, feedback: 'Right — even splitting ignores how much each server can actually handle.' },
+        { id: 'b', label: "It stops working entirely and sends all traffic to one server", correct: false, feedback: "It still alternates evenly — the problem is that 'even' isn't the right split for uneven servers." },
+      ],
     },
   ],
 }
@@ -583,6 +639,24 @@ const ch1Level5: Level = {
       },
     },
   ],
+  quizQuestions: [
+    {
+      id: 'q1',
+      question: 'What principle explains why caching works at all?',
+      options: [
+        { id: 'a', label: 'Locality of reference — recently requested data is likely to be requested again', correct: true, feedback: 'Right — straight from the source README.' },
+        { id: 'b', label: 'All data is requested exactly once, so caching prevents duplicate work', correct: false, feedback: "If data were only ever requested once, a cache would never get a hit — the opposite of why caching helps." },
+      ],
+    },
+    {
+      id: 'q2',
+      question: 'Between write-through and write-around, which one risks serving stale data after an update?',
+      options: [
+        { id: 'a', label: 'Write-around', correct: true, feedback: 'Right — the cache isn\'t updated at write time, so old entries can linger until naturally replaced.' },
+        { id: 'b', label: 'Write-through', correct: false, feedback: "Write-through updates the cache and the source at the same moment, so it stays accurate." },
+      ],
+    },
+  ],
 }
 
 import { CHAPTER_1_EXTRA_LEVELS } from './chapter1-extra'
@@ -592,9 +666,12 @@ import { CHAPTER_1_EXTRA_LEVELS } from './chapter1-extra'
 // everything after assumes "a request travels from a client to a server."
 // Clustering follows the dispatcher+depots build (L3) it names. Proxy and
 // Storage are placed after caching/routing since they lean on vocabulary
-// already built by then. CDN and Availability close the chapter, reusing
-// mechanics from every level before them.
-const [ip, osi, tcpUdp, dns, clustering, proxy, storage, cdn, availability] = CHAPTER_1_EXTRA_LEVELS
+// already built by then. CDN and Availability close out the mechanics
+// built so far, and Scalability caps the chapter as the formal synthesis
+// of the vertical/horizontal trade-off every level since L2 has been
+// practicing without naming.
+const [ip, osi, tcpUdp, dns, clustering, proxy, storage, cdn, availability, scalability] =
+  CHAPTER_1_EXTRA_LEVELS
 
 export const CHAPTER_1: Chapter = {
   id: 'ch1',
@@ -616,6 +693,7 @@ export const CHAPTER_1: Chapter = {
     storage.id,
     cdn.id,
     availability.id,
+    scalability.id,
   ],
 }
 
@@ -634,4 +712,5 @@ export const CHAPTER_1_LEVELS: Level[] = [
   storage,
   cdn,
   availability,
+  scalability,
 ]

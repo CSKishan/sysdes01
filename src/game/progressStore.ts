@@ -21,7 +21,9 @@ export interface ProgressState {
   resetProgress: () => void
 }
 
-const initialState = {
+// Exported so other code (e.g. Settings' import feature) can fall back to
+// the same defaults a fresh install would have, instead of re-typing them.
+export const initialState = {
   completedLevelIds: [] as string[],
   starsByLevelId: {} as Record<string, LevelStars>,
   unlockedComponentKinds: ['client'] as ComponentKind[],
@@ -60,6 +62,18 @@ export const useProgressStore = create<ProgressState>()(
 
       resetProgress: () => set(initialState),
     }),
-    { name: 'packet-and-post.progress' },
+    {
+      name: 'packet-and-post.progress',
+      // Bump this and extend `migrate` whenever the persisted shape changes,
+      // so existing players' progress survives an update instead of
+      // silently resetting. Pre-v1 data (implicitly version 0, from before
+      // this field existed) has the same shape as v1, so it just passes
+      // through -- but zustand's persist middleware discards any mismatched
+      // version with NO migrate function at all, so this passthrough is
+      // required from the first bump onward, not just once a real shape
+      // change happens.
+      version: 1,
+      migrate: (persisted) => persisted as ProgressState,
+    },
   ),
 )

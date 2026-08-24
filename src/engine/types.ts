@@ -1,10 +1,31 @@
 // Pure data types for the simulation engine. No React, no UI concerns.
 // This file is the contract between level content, the canvas, and the simulator.
 
-export type ComponentKind = 'client' | 'server' | 'loadBalancer' | 'cache'
+export type ComponentKind =
+  | 'client'
+  | 'server'
+  | 'loadBalancer'
+  | 'cache'
+  | 'database'
+  | 'replica'
+  | 'shardRouter'
+  | 'queue'
+  | 'broker'
+  | 'apiGateway'
+  | 'service'
 
 export type LbAlgorithm = 'roundRobin' | 'leastConnections' | 'hash'
 export type CachePolicy = 'writeThrough' | 'writeAround' | 'writeBack'
+export type DatabaseEngine = 'sql' | 'nosql'
+export type ReplicationMode = 'sync' | 'async'
+export type ShardStrategy = 'modulo' | 'consistentHash'
+export type DeliverySemantics = 'atMostOnce' | 'atLeastOnce'
+
+/** Whether a traffic segment represents a read or a write. Every existing
+ * component from Chapter I is opType-agnostic (a "depot" doesn't care) --
+ * this only starts to matter once `database`/`replica`/`cache` are in the
+ * graph, since those treat the two differently. */
+export type OpType = 'read' | 'write'
 
 export interface ClientConfig {
   kind: 'client'
@@ -52,7 +73,141 @@ export interface CacheConfig {
   staleFraction?: number
 }
 
-export type NodeConfig = ClientConfig | ServerConfig | LoadBalancerConfig | CacheConfig
+/** How much index maintenance slows a write down, and how much it speeds a
+ * read up -- one fixed, documented pair of multipliers so toggling
+ * DatabaseConfig.indexed produces a real, live-recomputed number instead of
+ * two independently hand-authored "before/after" graphs. Illustrative, in
+ * the same spirit as serviceTimeMs's M/M/1-flavored blowup -- not literal
+ * production numbers, but the right shape of trade-off. */
+export const INDEX_READ_SPEEDUP = 4
+export const INDEX_WRITE_OVERHEAD = 1.5
+
+export interface DatabaseConfig {
+  kind: 'database'
+  engine: DatabaseEngine
+  /** Max reads/sec before queueing/dropping. */
+  capacityRps: number
+  /** Read service time at near-zero utilization, in ms (pre-index effect). */
+  baseMs: number
+  /** Max writes/sec before queueing/dropping -- almost always lower than
+   * read capacity, since a write has to actually persist, not just look up. */
+  writeCapacityRps: number
+  /** Write service time at near-zero utilization, in ms (pre-index effect). */
+  writeBaseMs: number
+  /** An index trades slower writes (every write also updates the index)
+   * for much faster reads (no full scan) -- see INDEX_READ_SPEEDUP/
+   * INDEX_WRITE_OVERHEAD. */
+  indexed: boolean
+  costPerHour: number
+  availability?: number
+}
+
+export interface ReplicaConfig {
+  kind: 'replica'
+  /** Read-only: a replica serves reads from its own copy. Writes routed to
+   * one pass straight through to whatever it's wired to next (the primary). */
+  capacityRps: number
+  baseMs: number
+  costPerHour: number
+  availability?: number
+  replicationMode: ReplicationMode
+  /** Async only: the fraction of reads served here that reflect a write
+   * that hasn't propagated yet (0..1). Forced to 0 under 'sync'. Reuses the
+   * exact staleFraction/staleReadRate mechanic CacheConfig already has. */
+  staleReadFraction: number
+  /** Async only: authored/displayed lag behind the primary, in ms. Doesn't
+   * affect service time -- it feeds the maxReplicationLagMs SLO. Forced to
+   * 0 under 'sync' (a sync replica is, by definition, caught up). */
+  replicationLagMs: number
+  /** Sync only: how long a write has to wait for this replica to
+   * acknowledge it before it's considered done -- the real cost traded for
+   * never serving a stale read. Author-tunable like every other latency
+   * knob in the engine, so e.g. a cross-region sync replica can be given a
+   * much higher round-trip cost than a same-region one. Ignored under
+   * 'async' (nothing to wait for). */
+  syncAckWaitMs: number
+}
+
+export interface ShardRouterConfig {
+  kind: 'shardRouter'
+  strategy: ShardStrategy
+  /** Size of the key space requests are drawn from -- reuses the same
+   * Zipf-skew modeling the cache uses, so a shard router can show genuine
+   * hot-shard imbalance instead of a synthetic "some shards get more" claim. */
+  keyspaceSize: number
+  zipfS: number
+  costPerHour: number
+  availability?: number
+}
+
+export interface QueueConfig {
+  kind: 'queue'
+  /** Max items the backlog can hold before new arrivals are rejected
+   * outright (backpressure) instead of queueing. */
+  capacity: number
+  /** Max items/sec the queue can drain to whatever it's wired to next --
+   * independent of how fast items arrive, which is the whole point: a
+   * burst can arrive faster than this and still not error, as long as it
+   * fits under `capacity` and the average settles back under drainRps. */
+  drainRps: number
+  costPerHour: number
+  availability?: number
+}
+
+export interface BrokerConfig {
+  kind: 'broker'
+  /** Max messages/sec the broker itself can dispatch -- its own throughput
+   * ceiling, separate from whatever capacity each subscriber has. Every
+   * outgoing edge gets a full copy of surviving traffic (pub-sub fan-out),
+   * not a split the way a load balancer divides traffic across targets. */
+  capacityRps: number
+  baseMs: number
+  costPerHour: number
+  availability?: number
+  deliverySemantics: DeliverySemantics
+  /** atLeastOnce only: max messages the broker will hold and retry-dispatch
+   * when it's momentarily over its own capacity, instead of dropping them
+   * outright the way atMostOnce does -- the actual distinguishing trait of
+   * "at least once" delivery. Ignored under atMostOnce. */
+  retryBufferCapacity: number
+}
+
+export interface ApiGatewayConfig {
+  kind: 'apiGateway'
+  capacityRps: number
+  /** The added hop's own latency at near-zero utilization, in ms -- auth
+   * check, rate-limit check, routing lookup. */
+  baseMs: number
+  costPerHour: number
+  availability?: number
+}
+
+export interface ServiceConfig {
+  kind: 'service'
+  /** Same shape as ServerConfig -- a `service` is a server that's meant to
+   * be chained to other services/databases via ordinary graph edges. That
+   * chaining is what a "microservice" is, engine-wise: cascading failure
+   * and monolith-vs-microservices cost/latency/availability comparisons
+   * fall out of the existing segment-flow and availability-composition
+   * machinery for free, with no new mechanic needed for "depends on." */
+  capacityRps: number
+  baseMs: number
+  costPerHour: number
+  availability?: number
+}
+
+export type NodeConfig =
+  | ClientConfig
+  | ServerConfig
+  | LoadBalancerConfig
+  | CacheConfig
+  | DatabaseConfig
+  | ReplicaConfig
+  | ShardRouterConfig
+  | QueueConfig
+  | BrokerConfig
+  | ApiGatewayConfig
+  | ServiceConfig
 
 export interface GraphNode {
   id: string
@@ -82,6 +237,10 @@ export interface Workload {
   trafficCurve: TrafficCurve
   /** Optional label shown on the dashboard, e.g. "Lunch rush". */
   label?: string
+  /** Fraction of offered traffic that's a write, 0..1. Defaults to 0 (all
+   * reads) when omitted, so every level authored before this field existed
+   * behaves exactly as it did before. */
+  writeFraction?: number
 }
 
 export interface IncidentWindow {
@@ -93,6 +252,9 @@ export interface IncidentWindow {
   trafficMultiplier?: number
   /** Node ids to treat as fully unavailable (capacity 0) while active. */
   killNodeIds?: string[]
+  /** Edge ids to treat as severed (no traffic crosses them) while active --
+   * a network partition, as opposed to a node outright dying. */
+  severedEdgeIds?: string[]
 }
 
 export interface NodeTickMetric {
@@ -103,6 +265,9 @@ export interface NodeTickMetric {
   serviceMs: number
   errorRps: number
   cacheHitRate?: number
+  /** Current backlog size (items), for a queue or an at-least-once
+   * broker's retry buffer. Undefined for every other node kind. */
+  queueDepth?: number
 }
 
 export interface TickSummary {
@@ -122,16 +287,35 @@ export interface SimAggregate {
   errorRate: number
   costPerHour: number
   avgCacheHitRate: number | null
-  /** Fraction of all completed requests that were answered from a cache
-   * serving stale data (see CacheConfig.staleFraction). 0 if no cache is
-   * configured to serve stale data. */
+  /** Fraction of all completed requests that were answered from a cache or
+   * replica serving stale data (see CacheConfig.staleFraction and
+   * ReplicaConfig.staleReadFraction). 0 if nothing in the graph serves
+   * stale data. */
   staleReadRate: number
   /** Estimated system uptime, 0..1, from the graph's static topology (not
    * traffic-dependent) -- see computeSystemAvailability in metrics.ts. */
   availability: number
+  /** Estimated chance a write, once acknowledged, survives losing any one
+   * node (0..1) -- see computeSystemDurability in metrics.ts. 1 when the
+   * graph has no database/replica node at all (nothing to lose). */
+  durability: number
   maxUtilization: number
   /** The node id that spent the most time at/above 100% utilization, if any. */
   bottleneckNodeId: string | null
+  /** p50/p99 latency of write-opType traffic only. 0 when the workload has
+   * no writeFraction (i.e. every existing pre-Chapter-II level). */
+  writeP50Ms: number
+  writeP99Ms: number
+  /** How lopsided the busiest shard is vs. an even split, from the graph's
+   * shardRouter node(s): 1 = perfectly even, 2 = the busiest shard gets 2x
+   * an even share, etc. 1 (neutral/no-op) when the graph has no shardRouter. */
+  maxShardImbalance: number
+  /** The largest authored replicationLagMs among the graph's replica nodes,
+   * ms. 0 when the graph has no async replica. */
+  maxReplicationLagMs: number
+  /** The largest backlog (items) any queue or at-least-once broker's retry
+   * buffer ever held during the run. 0 when the graph has neither. */
+  maxQueueDepth: number
 }
 
 export interface SimResult {

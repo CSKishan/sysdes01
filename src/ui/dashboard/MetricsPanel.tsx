@@ -1,14 +1,31 @@
 import type { SimResult } from '@/engine/types'
 import { StatTile } from './StatTile'
 
-export type MetricKey = 'latency' | 'throughput' | 'errors' | 'cost' | 'cacheHitRate' | 'availability'
+export type MetricKey =
+  | 'latency'
+  | 'throughput'
+  | 'errors'
+  | 'cost'
+  | 'cacheHitRate'
+  | 'availability'
+  | 'writeLatency'
+  | 'durability'
+  | 'replicationLag'
+  | 'shardImbalance'
+  | 'queueDepth'
 
-const ALL_METRICS: MetricKey[] = ['latency', 'throughput', 'errors', 'cost', 'cacheHitRate', 'availability']
+// The six metrics every Chapter 0/1 level already relies on as its
+// implicit default (no level has ever authored `visibleMetrics`). The four
+// Chapter II+ metrics (writeLatency, durability, replicationLag,
+// shardImbalance) are opt-in only -- a level lists them explicitly once
+// they're actually relevant, instead of every existing dashboard suddenly
+// growing four new near-always-neutral tiles.
+const DEFAULT_METRICS: MetricKey[] = ['latency', 'throughput', 'errors', 'cost', 'cacheHitRate', 'availability']
 
 export function MetricsPanel({
   result,
   tickIndex,
-  visibleMetrics = ALL_METRICS,
+  visibleMetrics = DEFAULT_METRICS,
 }: {
   result: SimResult | null
   /** Which tick to read live values from; omit to show the final aggregate. */
@@ -71,6 +88,37 @@ export function MetricsPanel({
           tone={result.aggregate.availability >= 0.999 ? 'ok' : result.aggregate.availability >= 0.99 ? 'warn' : 'bad'}
         />
       )}
+      {visibleMetrics.includes('writeLatency') && (
+        <StatTile
+          label="Write p50 / p99"
+          value={`${Math.round(result.aggregate.writeP50Ms)} / ${Math.round(result.aggregate.writeP99Ms)}ms`}
+          tone={result.aggregate.writeP99Ms > 1000 ? 'bad' : result.aggregate.writeP99Ms > 400 ? 'warn' : 'ok'}
+        />
+      )}
+      {visibleMetrics.includes('durability') && (
+        <StatTile
+          label="Durability"
+          value={`${(result.aggregate.durability * 100).toFixed(3)}%`}
+          tone={result.aggregate.durability >= 0.999 ? 'ok' : result.aggregate.durability >= 0.99 ? 'warn' : 'bad'}
+        />
+      )}
+      {visibleMetrics.includes('replicationLag') && (
+        <StatTile
+          label="Replication lag"
+          value={`${Math.round(result.aggregate.maxReplicationLagMs)}ms`}
+          tone={result.aggregate.maxReplicationLagMs > 500 ? 'bad' : result.aggregate.maxReplicationLagMs > 100 ? 'warn' : 'ok'}
+        />
+      )}
+      {visibleMetrics.includes('shardImbalance') && (
+        <StatTile
+          label="Shard imbalance"
+          value={`${result.aggregate.maxShardImbalance.toFixed(2)}x`}
+          tone={result.aggregate.maxShardImbalance > 2 ? 'bad' : result.aggregate.maxShardImbalance > 1.3 ? 'warn' : 'ok'}
+        />
+      )}
+      {visibleMetrics.includes('queueDepth') && (
+        <StatTile label="Peak queue depth" value={`${Math.round(result.aggregate.maxQueueDepth)} items`} />
+      )}
     </div>
   )
 }
@@ -89,5 +137,15 @@ function labelFor(key: MetricKey): string {
       return 'Cache hit rate'
     case 'availability':
       return 'Availability'
+    case 'writeLatency':
+      return 'Write p50 / p99'
+    case 'durability':
+      return 'Durability'
+    case 'replicationLag':
+      return 'Replication lag'
+    case 'shardImbalance':
+      return 'Shard imbalance'
+    case 'queueDepth':
+      return 'Peak queue depth'
   }
 }

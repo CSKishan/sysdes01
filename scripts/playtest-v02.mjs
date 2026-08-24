@@ -17,9 +17,9 @@ function check(label, condition) {
 }
 
 async function main() {
-  const browser = await chromium.launch({
-    executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-  })
+  // Uses whichever Chromium `npx playwright install` put on this machine,
+  // via Playwright's own resolver -- no hardcoded, platform-specific path.
+  const browser = await chromium.launch()
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 } })
   page.on('pageerror', (err) => {
     console.log(`  ✗ PAGE ERROR: ${err.message}`)
@@ -55,7 +55,7 @@ async function main() {
     await page.getByRole('button', { name: 'Continue' }).click()
     await page.waitForSelector('text=Packet and Post')
   }
-  for (const id of ['ch0-l1', 'ch0-l2', 'ch0-l3', 'ch0-l4', 'ch0-l5']) {
+  for (const id of ['ch0-l0', 'ch0-l1', 'ch0-l2', 'ch0-l3', 'ch0-l4', 'ch0-l5']) {
     await completeTeachOnlyLevelById(id)
   }
 

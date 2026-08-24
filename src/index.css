@@ -93,3 +93,46 @@ body {
   border-bottom: 1.5px solid;
   border-left: 1.5px solid;
 }
+
+/* Set by settingsStore's reducedMotion toggle (applied to <html> in
+   App.tsx) and by the OS-level prefers-reduced-motion media query --
+   whichever asks for it, kill every CSS animation/transition outright.
+   The two trigger mechanisms (an attribute selector, a media query) can't
+   share one CSS rule, but they share this one variable, so a future
+   tweak to the actual duration/count can't update one and miss the other. */
+:root {
+  --motion-kill-duration: 0.001ms;
+  --motion-kill-iterations: 1;
+}
+
+[data-reduced-motion="true"] *,
+[data-reduced-motion="true"] *::before,
+[data-reduced-motion="true"] *::after {
+  animation-duration: var(--motion-kill-duration) !important;
+  animation-iteration-count: var(--motion-kill-iterations) !important;
+  transition-duration: var(--motion-kill-duration) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: var(--motion-kill-duration) !important;
+    animation-iteration-count: var(--motion-kill-iterations) !important;
+    transition-duration: var(--motion-kill-duration) !important;
+  }
+}
+
+/* Cheat sheets (Phase 1.6) are the one view meant to leave the screen --
+   drop the dark drafting-table background and grid for a plain printable
+   page instead of forcing dark ink onto paper. Scoped to a class
+   CheatSheetPage toggles on <body> while mounted (not a bare `body`
+   selector) -- every other page's text is colored for the dark
+   background and has no print-specific override, so forcing the
+   background white globally left it illegible on print. */
+@media print {
+  body.print-cheatsheet {
+    background-image: none;
+    background-color: white;
+  }
+}

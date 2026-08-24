@@ -41,11 +41,31 @@ export interface Diagram {
   caption?: string
 }
 
+export interface SequenceMessage {
+  direction: 'clientToServer' | 'serverToClient'
+  label: string
+  /** Shows a "waiting" gap before this message -- the visual difference
+   * between an immediate exchange and one where a connection just sits
+   * open/pending (long polling's whole mechanic, for instance). */
+  wait?: boolean
+}
+
+/** A client/server sequence-timeline diagram: who sent what, in what order,
+ * and whether anything waited in between. MiniDiagram (a dot traveling a
+ * row of topology icons) can't represent this -- REST vs GraphQL vs gRPC
+ * and long polling vs WebSockets vs SSE are differences in *request
+ * pattern over time*, not differences in what boxes sit on a canvas. */
+export interface SequenceDiagram {
+  steps: SequenceMessage[]
+  caption?: string
+}
+
 export interface TeachStage {
   kind: 'teach'
   title: string
   body: string[]
   diagram?: Diagram
+  sequenceDiagram?: SequenceDiagram
   readmeQuote: ReadmeQuote
   realWorldExamples: string[]
   check: ComprehensionCheck
@@ -67,6 +87,20 @@ export interface SloTarget {
   minThroughputRps?: number
   /** Minimum estimated system uptime, 0..1 (see computeSystemAvailability). */
   minAvailability?: number
+  /** Minimum estimated write durability, 0..1 (see computeSystemDurability). */
+  minDurability?: number
+  /** p99 latency of write-opType traffic only -- only meaningful once
+   * Workload.writeFraction > 0. */
+  maxWriteP99Ms?: number
+  /** Max authored replicationLagMs among the graph's async replica nodes. */
+  maxReplicationLagMs?: number
+  /** How lopsided the busiest shard's traffic is vs. an even split (1 =
+   * perfectly even). Only meaningful once the graph has a shardRouter. */
+  maxShardImbalance?: number
+  /** Max backlog (items) ever held by a queue or an at-least-once broker's
+   * retry buffer over the run. Only meaningful once the graph has one of
+   * those -- 0 otherwise. */
+  maxQueueDepth?: number
 }
 
 export interface DebriefContent {

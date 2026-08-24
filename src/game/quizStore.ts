@@ -17,6 +17,7 @@ export interface QuizState {
   recordSession: (summary: Omit<QuizSessionSummary, 'timestamp'>) => void
   totalCorrect: () => number
   totalAnswered: () => number
+  clear: () => void
 }
 
 export const useQuizStore = create<QuizState>()(
@@ -27,7 +28,15 @@ export const useQuizStore = create<QuizState>()(
         set((state) => ({ sessions: [...state.sessions, { ...summary, timestamp: Date.now() }] })),
       totalCorrect: () => get().sessions.reduce((acc, s) => acc + s.correct, 0),
       totalAnswered: () => get().sessions.reduce((acc, s) => acc + s.total, 0),
+      clear: () => set({ sessions: [] }),
     }),
-    { name: 'packet-and-post.quiz' },
+    {
+      name: 'packet-and-post.quiz',
+      // See progressStore.ts for why both `version` and `migrate` are
+      // required together -- without `migrate`, this discards every
+      // existing player's quiz history instead of preserving it.
+      version: 1,
+      migrate: (persisted) => persisted as QuizState,
+    },
   ),
 )

@@ -1,68 +1,111 @@
-import { useState } from 'react'
+import { useEffect } from 'react'
+import { HashRouter, Routes, Route, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { ComponentKind } from '@/engine/types'
-import { getLevel } from '@/content/registry'
+import { getLevel, isLevelUnlocked } from '@/content/registry'
 import { useProgressStore, type LevelStars } from '@/game/progressStore'
+import { useSettingsStore } from '@/game/settingsStore'
 import { ChapterMap } from '@/ui/campaign/ChapterMap'
 import { LevelPlayer } from '@/ui/campaign/LevelPlayer'
 import { JournalView } from '@/ui/journal/JournalView'
 import { SandboxView } from '@/ui/sandbox/SandboxView'
 import { QuizView } from '@/ui/quiz/QuizView'
+import { SettingsView } from '@/ui/settings/SettingsView'
+import { Button } from '@/ui/shared/Button'
+import { LibraryHome } from '@/ui/library/LibraryHome'
+import { TopicPage } from '@/ui/library/TopicPage'
+import { GlossaryPage } from '@/ui/library/GlossaryPage'
+import { NumbersPage } from '@/ui/library/NumbersPage'
+import { CheatSheetPage } from '@/ui/library/CheatSheetPage'
+import { SearchPalette } from '@/ui/library/SearchPalette'
 
-type View =
-  | { screen: 'map' }
-  | { screen: 'level'; levelId: string; challengeMode: boolean }
-  | { screen: 'journal' }
-  | { screen: 'sandbox' }
-  | { screen: 'quiz' }
+function ChapterMapRoute() {
+  const navigate = useNavigate()
+  return (
+    <ChapterMap
+      onPlayLevel={(levelId, challengeMode) =>
+        navigate(challengeMode ? `/level/${levelId}?mode=challenge` : `/level/${levelId}`)
+      }
+      onOpenJournal={() => navigate('/journal')}
+      onOpenSandbox={() => navigate('/sandbox')}
+      onOpenQuiz={() => navigate('/quiz')}
+      onOpenSettings={() => navigate('/settings')}
+    />
+  )
+}
 
-function App() {
-  const [view, setView] = useState<View>({ screen: 'map' })
+function LevelRoute() {
+  const { levelId } = useParams<{ levelId: string }>()
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const completeLevel = useProgressStore((s) => s.completeLevel)
+  const completedLevelIds = useProgressStore((s) => s.completedLevelIds)
+  const isChallengeUnlocked = useProgressStore((s) => s.isChallengeUnlocked)
+  const level = levelId ? getLevel(levelId) : undefined
 
-  if (view.screen === 'journal') {
-    return <JournalView onBack={() => setView({ screen: 'map' })} />
-  }
-
-  if (view.screen === 'sandbox') {
-    return <SandboxView onBack={() => setView({ screen: 'map' })} />
-  }
-
-  if (view.screen === 'quiz') {
-    return <QuizView onBack={() => setView({ screen: 'map' })} />
-  }
-
-  if (view.screen === 'level') {
-    const level = getLevel(view.levelId)
-    if (!level) {
-      return (
-        <div className="p-8 text-ink-200">
-          Couldn't find that level.{' '}
-          <button className="underline" onClick={() => setView({ screen: 'map' })}>
-            Back to map
-          </button>
-        </div>
-      )
-    }
+  if (!level) {
     return (
-      <LevelPlayer
-        level={level}
-        challengeMode={view.challengeMode}
-        onExit={() => setView({ screen: 'map' })}
-        onLevelComplete={(stars: LevelStars, unlockedKinds: ComponentKind[]) => {
-          completeLevel(level.id, stars, unlockedKinds)
-          setView({ screen: 'map' })
-        }}
-      />
+      <div className="p-8 text-ink-200">
+        Couldn't find that level.{' '}
+        <Button variant="secondary" className="ml-2" onClick={() => navigate('/')}>
+          Back to map
+        </Button>
+      </div>
     )
   }
 
+  // The level screen used to be reachable only through ChapterMap's Play
+  // button (disabled while locked). Now that /level/:id is a real,
+  // bookmarkable/shareable URL, that gate has to be re-enforced here too,
+  // or a direct link bypasses progression entirely.
+  if (!isLevelUnlocked(level.id, completedLevelIds)) {
+    return <Navigate to="/" replace />
+  }
+
   return (
-    <ChapterMap
-      onPlayLevel={(levelId, challengeMode) => setView({ screen: 'level', levelId, challengeMode })}
-      onOpenJournal={() => setView({ screen: 'journal' })}
-      onOpenSandbox={() => setView({ screen: 'sandbox' })}
-      onOpenQuiz={() => setView({ screen: 'quiz' })}
+    <LevelPlayer
+      level={level}
+      challengeMode={searchParams.get('mode') === 'challenge' && isChallengeUnlocked(level.id)}
+      onExit={() => navigate('/')}
+      onLevelComplete={(stars: LevelStars, unlockedKinds: ComponentKind[]) => {
+        completeLevel(level.id, stars, unlockedKinds)
+        navigate('/')
+      }}
     />
+  )
+}
+
+function AppRoutes() {
+  const navigate = useNavigate()
+  return (
+    <Routes>
+      <Route path="/" element={<ChapterMapRoute />} />
+      <Route path="/level/:levelId" element={<LevelRoute />} />
+      <Route path="/journal" element={<JournalView onBack={() => navigate('/')} />} />
+      <Route path="/sandbox" element={<SandboxView onBack={() => navigate('/')} />} />
+      <Route path="/quiz" element={<QuizView onBack={() => navigate('/')} />} />
+      <Route path="/settings" element={<SettingsView onBack={() => navigate('/')} />} />
+      <Route path="/library" element={<LibraryHome />} />
+      <Route path="/library/topic/:levelId" element={<TopicPage />} />
+      <Route path="/library/glossary" element={<GlossaryPage />} />
+      <Route path="/library/numbers" element={<NumbersPage />} />
+      <Route path="/library/cheatsheet/:chapterId" element={<CheatSheetPage />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
+}
+
+function App() {
+  const reducedMotion = useSettingsStore((s) => s.reducedMotion)
+
+  useEffect(() => {
+    document.documentElement.dataset.reducedMotion = reducedMotion ? 'true' : 'false'
+  }, [reducedMotion])
+
+  return (
+    <HashRouter>
+      <SearchPalette />
+      <AppRoutes />
+    </HashRouter>
   )
 }
 

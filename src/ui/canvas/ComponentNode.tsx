@@ -16,7 +16,14 @@ export function ComponentNode({ id, data, selected }: NodeProps<FlowNode>) {
   const def = COMPONENT_REGISTRY[data.config.kind]
   const Icon = COMPONENT_ICONS[data.config.kind]
   const metric = useNodeMetric(id)
-  const showsUtilization = data.config.kind === 'server'
+  const showsUtilization =
+    data.config.kind === 'server' ||
+    data.config.kind === 'database' ||
+    data.config.kind === 'replica' ||
+    data.config.kind === 'queue' ||
+    data.config.kind === 'broker' ||
+    data.config.kind === 'apiGateway' ||
+    data.config.kind === 'service'
   const showsHitRate = data.config.kind === 'cache'
 
   const utilization = metric?.utilization ?? 0

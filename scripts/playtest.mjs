@@ -18,9 +18,9 @@ function check(label, condition) {
 }
 
 async function main() {
-  const browser = await chromium.launch({
-    executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-  })
+  // Uses whichever Chromium `npx playwright install` put on this machine,
+  // via Playwright's own resolver -- no hardcoded, platform-specific path.
+  const browser = await chromium.launch()
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 } })
   page.on('pageerror', (err) => {
     console.log(`  ✗ PAGE ERROR: ${err.message}`)
@@ -52,7 +52,8 @@ async function main() {
     await page.waitForSelector('text=Packet and Post')
   }
 
-  console.log('\n== Playing through Chapter 0 (5 teach-only levels) ==')
+  console.log('\n== Playing through Chapter 0 (6 teach-only levels) ==')
+  await completeTeachOnlyLevel('ch0-l0', 'You just took over', 'System design', 'Because later decisions and real data end up depending on them, making them expensive to undo')
   await completeTeachOnlyLevel('ch0-l1', 'Welcome to Packet & Post', 'Request and response', 'The customer asking the question')
   check('ch0-l1 completed', (await page.getByTestId('level-row-ch0-l1').getAttribute('data-completed')) === 'true')
   check('ch0-l2 now unlocked', (await page.getByTestId('level-row-ch0-l2').getAttribute('data-unlocked')) === 'true')

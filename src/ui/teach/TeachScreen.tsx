@@ -2,6 +2,7 @@ import type { TeachStage } from '@/content/types'
 import { Panel } from '@/ui/shared/Panel'
 import { RichParagraphs, RichText } from '@/ui/shared/RichText'
 import { MiniDiagram } from './MiniDiagram'
+import { SequenceDiagramView } from './SequenceDiagramView'
 import { ComprehensionCheck } from './ComprehensionCheck'
 
 export function TeachScreen({
@@ -21,6 +22,7 @@ export function TeachScreen({
         <RichParagraphs paragraphs={stage.body} />
 
         {stage.diagram && <MiniDiagram diagram={stage.diagram} />}
+        {stage.sequenceDiagram && <SequenceDiagramView diagram={stage.sequenceDiagram} />}
 
         <blockquote className="mt-5 border-l-4 border-brand-500 bg-ink-950/50 py-3 pl-4 pr-3">
           <p className="text-sm italic text-ink-300">
