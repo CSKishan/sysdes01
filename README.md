@@ -13,21 +13,36 @@ verbatim passage from the source README that covers what just happened.
 
 ## Status
 
-Chapter 0 (6 levels) and Chapter I (15 levels, from IP addressing through
-caching, CDN, availability, and scalability) are complete: situation → teach
-→ guided build → solo build → twist, the canvas, live dashboard, decision
-journal, quiz mode with a question bank covering every level, and a
-free-build sandbox. Routing is real (`/level/:id`, `/journal`, `/sandbox`,
-`/quiz`, `/settings`) so any screen is linkable, and progress/journal/quiz
-data can be exported and re-imported from Settings.
+Chapter 0 (6 levels), Chapter I (15 levels, from IP addressing through
+caching, CDN, availability, and scalability), and Chapter II (15 levels,
+from the database primitive through replication, indexes, ACID/BASE, CAP,
+PACELC, transactions, sharding, consistent hashing, and federation) are
+complete: situation → teach → guided build → solo build → twist, the
+canvas, live dashboard, decision journal, quiz mode with a question bank
+covering every level, and a free-build sandbox. Routing is real
+(`/level/:id`, `/journal`, `/sandbox`, `/quiz`, `/settings`, `/library/*`)
+so any screen is linkable, and progress/journal/quiz data can be exported
+and re-imported from Settings.
 
-**Chapters II–V of the source curriculum are not yet built** — databases,
-sharding and consistency (Chapter II), messaging and service architecture
-(Chapter III), resilience and security (Chapter IV), and the system design
-case studies (Chapter V). The current engine only models read traffic
-through four primitives (client, server, load balancer, cache); Chapter II
-onward needs writes, persistence, and async primitives the engine doesn't
-have yet. That work is scoped but not started.
+The engine models both reads and writes through seven primitives (client,
+server, load balancer, cache, database, replica, shard router), with
+consistent hashing, replication lag/staleness, write durability, and
+shard-imbalance all live-simulated rather than scripted. The Sandbox has a
+chaos toggle (traffic spike, node outage, network partition) for poking at
+failure scenarios outside of an authored level.
+
+**`/library`** is a second, ungated way into all 36 levels' content —
+browse or full-text search (Ctrl/Cmd-K) every topic, an inline-linked
+glossary, a "numbers every engineer should know" reference, and
+print-friendly per-chapter cheat sheets — without needing to play through
+the campaign first.
+
+**Chapters III–V of the source curriculum are not yet built** — messaging
+and service architecture (Chapter III), resilience and security
+(Chapter IV), and the system design case studies (Chapter V). Chapter III
+onward needs async primitives (queue, broker, API gateway, service) and a
+sequence-diagram teaching primitive the engine and UI don't have yet. That
+work is scoped but not started.
 
 ## Running locally
 
@@ -56,9 +71,13 @@ node scripts/playtest-v02.mjs
 src/
   engine/      # pure TypeScript simulator -- no React. Deterministic
                # queueing model: utilization -> latency, Zipf-modeled cache
-               # hit rates, load-balancer routing algorithms, availability
-               # math straight from the source README's own formulas.
-  content/     # levels as data: chapters, levels, stages, decision cards
+               # hit rates, load-balancer routing algorithms, replication
+               # lag/staleness, consistent hashing, availability and
+               # durability math straight from the source README's own
+               # formulas.
+  content/     # levels as data: chapters, levels, stages, decision cards,
+               # plus the glossary, numbers reference, and search index
+               # that power /library
   game/        # zustand stores (progress, decision journal, quiz history,
                # display settings) + scoring
   ui/
@@ -68,9 +87,10 @@ src/
     dashboard/ # live metrics, latency chart, simulation playback
     debrief/   # decision cards, scorecard + README-quote debrief
     campaign/  # level player, chapter map
-    sandbox/   # free build, no objectives
+    sandbox/   # free build, no objectives, chaos toggle
     journal/   # the player's own accumulated decision log
     settings/  # reset/export/import progress, reduced-motion toggle
+    library/   # ungated topic/glossary/numbers/cheat-sheet pages + search
 ```
 
 The engine is the one part of this app that has to be right: every number
