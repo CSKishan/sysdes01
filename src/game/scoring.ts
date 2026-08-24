@@ -43,6 +43,7 @@ export const SLO_FIELD_FORMATS: Record<keyof SloTarget, { label: string; formatT
   maxWriteP99Ms: { label: 'Write p99 latency', formatTarget: (v) => `≤ ${v}ms` },
   maxReplicationLagMs: { label: 'Replication lag', formatTarget: (v) => `≤ ${v}ms` },
   maxShardImbalance: { label: 'Shard imbalance', formatTarget: (v) => `≤ ${v.toFixed(2)}x` },
+  maxQueueDepth: { label: 'Queue depth', formatTarget: (v) => `≤ ${v} items` },
 }
 
 export function scoreRun(result: SimResult, slo: SloTarget): ScoreResult {
@@ -162,6 +163,17 @@ export function scoreRun(result: SimResult, slo: SloTarget): ScoreResult {
       passed: ratio <= 1,
       actual: `${result.aggregate.maxShardImbalance.toFixed(2)}x`,
       target: SLO_FIELD_FORMATS.maxShardImbalance.formatTarget(slo.maxShardImbalance),
+      margin: marginFromRatio(ratio),
+    })
+  }
+  if (slo.maxQueueDepth !== undefined) {
+    const ratio =
+      slo.maxQueueDepth > 0 ? result.aggregate.maxQueueDepth / slo.maxQueueDepth : result.aggregate.maxQueueDepth > 0 ? Infinity : 0
+    checks.push({
+      label: SLO_FIELD_FORMATS.maxQueueDepth.label,
+      passed: ratio <= 1,
+      actual: `${Math.round(result.aggregate.maxQueueDepth)} items`,
+      target: SLO_FIELD_FORMATS.maxQueueDepth.formatTarget(slo.maxQueueDepth),
       margin: marginFromRatio(ratio),
     })
   }

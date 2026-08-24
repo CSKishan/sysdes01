@@ -6,6 +6,7 @@ import { SLO_FIELD_FORMATS } from '@/game/scoring'
 import { Panel } from '@/ui/shared/Panel'
 import { Badge } from '@/ui/shared/Badge'
 import { MiniDiagram } from '@/ui/teach/MiniDiagram'
+import { SequenceDiagramView } from '@/ui/teach/SequenceDiagramView'
 import { RichParagraphs, RichText } from '@/ui/shared/RichText'
 import { LibraryLayout } from './LibraryLayout'
 
@@ -147,6 +148,7 @@ export function TopicPage() {
             <div key={i} className={i > 0 ? 'mt-6 border-t border-ink-800 pt-6' : ''}>
               <RichParagraphs paragraphs={stage.body} />
               {stage.diagram && <MiniDiagram diagram={stage.diagram} />}
+              {stage.sequenceDiagram && <SequenceDiagramView diagram={stage.sequenceDiagram} />}
               <QuoteBlock quote={stage.readmeQuote.text} source={stage.readmeQuote.source} />
               <RealWorldExamples examples={stage.realWorldExamples} />
               <StaticCheck check={stage.check} />

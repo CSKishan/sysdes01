@@ -14,6 +14,7 @@ import { CanvasEditor } from '@/ui/canvas/CanvasEditor'
 import { RunControls } from '@/ui/dashboard/RunControls'
 import { MetricsPanel } from '@/ui/dashboard/MetricsPanel'
 import { LatencyChart } from '@/ui/dashboard/LatencyChart'
+import { QueueDepthChart } from '@/ui/dashboard/QueueDepthChart'
 import { useSimulationPlayback } from '@/ui/dashboard/useSimulationPlayback'
 import { Panel } from '@/ui/shared/Panel'
 import { Button } from '@/ui/shared/Button'
@@ -200,6 +201,7 @@ export function SandboxView({ onBack }: { onBack: () => void }) {
                 'durability',
                 'replicationLag',
                 'shardImbalance',
+                'queueDepth',
               ]}
             />
           </Panel>
@@ -209,6 +211,14 @@ export function SandboxView({ onBack }: { onBack: () => void }) {
                 Latency over time
               </p>
               <LatencyChart result={playback.result} tickIndex={playback.tickIndex} />
+            </Panel>
+          )}
+          {playback.result && playback.result.nodeTicks.some((nm) => nm.queueDepth !== undefined) && (
+            <Panel className="p-3">
+              <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-widest text-ink-400">
+                Queue depth over time
+              </p>
+              <QueueDepthChart result={playback.result} tickIndex={playback.tickIndex} />
             </Panel>
           )}
         </div>

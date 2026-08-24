@@ -3,12 +3,16 @@
 // one file means the UI can never drift from what the simulator understands.
 
 import type {
+  ApiGatewayConfig,
+  BrokerConfig,
   CacheConfig,
   ComponentKind,
   DatabaseConfig,
   LoadBalancerConfig,
+  QueueConfig,
   ReplicaConfig,
   ServerConfig,
+  ServiceConfig,
   ShardRouterConfig,
 } from './types'
 
@@ -26,6 +30,10 @@ export interface ComponentDefinition {
     | DatabaseConfig
     | ReplicaConfig
     | ShardRouterConfig
+    | QueueConfig
+    | BrokerConfig
+    | ApiGatewayConfig
+    | ServiceConfig
     | { kind: 'client' },
     never
   >
@@ -122,6 +130,56 @@ export const COMPONENT_REGISTRY: Record<ComponentKind, ComponentDefinition> = {
       keyspaceSize: 1000,
       zipfS: 1.1,
       costPerHour: 4,
+    }),
+  },
+  queue: {
+    kind: 'queue',
+    realName: 'Message queue',
+    analogyName: 'The holding bay',
+    shortDescription: 'Holds a burst of orders instead of turning them away.',
+    defaultConfig: (): QueueConfig => ({
+      kind: 'queue',
+      capacity: 200,
+      drainRps: 40,
+      costPerHour: 5,
+    }),
+  },
+  broker: {
+    kind: 'broker',
+    realName: 'Message broker',
+    analogyName: 'The dispatch board',
+    shortDescription: 'Posts one notice that every subscribed depot gets its own copy of.',
+    defaultConfig: (): BrokerConfig => ({
+      kind: 'broker',
+      capacityRps: 80,
+      baseMs: 20,
+      costPerHour: 6,
+      deliverySemantics: 'atLeastOnce',
+      retryBufferCapacity: 100,
+    }),
+  },
+  apiGateway: {
+    kind: 'apiGateway',
+    realName: 'API gateway',
+    analogyName: 'The reception desk',
+    shortDescription: 'The one door every order passes through before reaching a depot.',
+    defaultConfig: (): ApiGatewayConfig => ({
+      kind: 'apiGateway',
+      capacityRps: 100,
+      baseMs: 15,
+      costPerHour: 6,
+    }),
+  },
+  service: {
+    kind: 'service',
+    realName: 'Microservice',
+    analogyName: 'Courier team',
+    shortDescription: 'A small team that does one job, and can depend on other teams to do theirs.',
+    defaultConfig: (): ServiceConfig => ({
+      kind: 'service',
+      capacityRps: 50,
+      baseMs: 60,
+      costPerHour: 9,
     }),
   },
 }

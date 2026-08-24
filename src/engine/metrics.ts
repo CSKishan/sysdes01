@@ -129,6 +129,36 @@ export function computeSystemAvailability(graph: SimGraph): number {
       return availabilitySeries(own, availabilityParallel(...branchAvailabilities))
     }
 
+    if (node.config.kind === 'queue' || node.config.kind === 'service') {
+      // Same shape as `server`/`database`: a single chain, no fan-out
+      // redundancy of its own.
+      const own = node.config.availability ?? DEFAULT_SERVER_AVAILABILITY
+      if (children.length === 0) return own
+      return availabilitySeries(own, ...children.map((c) => walk(c, nextVisited)))
+    }
+
+    if (node.config.kind === 'apiGateway') {
+      // Approximation, same shape as shardRouter's: the gateway's own
+      // availability in series with a parallel composition of what it
+      // routes to.
+      const own = node.config.availability ?? DEFAULT_LB_AVAILABILITY
+      if (children.length === 0) return own
+      const branchAvailabilities = children.map((c) => walk(c, nextVisited))
+      return availabilitySeries(own, availabilityParallel(...branchAvailabilities))
+    }
+
+    if (node.config.kind === 'broker') {
+      // NOT the shardRouter/gateway shape: a broker's subscribers each get
+      // their own full copy to do their own distinct job (see Chapter III
+      // · Publish-Subscribe) -- they aren't redundant replicas of each
+      // other the way a load balancer's targets are, so losing one isn't
+      // masked by the others surviving. Composed in series with every
+      // subscriber instead, same shape as queue/service.
+      const own = node.config.availability ?? DEFAULT_LB_AVAILABILITY
+      if (children.length === 0) return own
+      return availabilitySeries(own, ...children.map((c) => walk(c, nextVisited)))
+    }
+
     return 1
   }
 

@@ -21,6 +21,8 @@ import {
   type WeightedSample,
 } from './metrics'
 import type {
+  ApiGatewayConfig,
+  BrokerConfig,
   CacheConfig,
   DatabaseConfig,
   GraphEdge,
@@ -29,8 +31,10 @@ import type {
   LoadBalancerConfig,
   NodeTickMetric,
   OpType,
+  QueueConfig,
   ReplicaConfig,
   ServerConfig,
+  ServiceConfig,
   ShardRouterConfig,
   SimAggregate,
   SimGraph,
@@ -53,6 +57,94 @@ const EPS = 1e-9
  * a cache/replica forwarding a write past itself) -- every hop costs
  * something, consistent with the load balancer's existing dispatchMs. */
 const PASS_THROUGH_MS = 1
+
+/** One FIFO backlog entry: a slice of traffic that arrived but couldn't be
+ * drained/dispatched the moment it showed up. Shared by `queue` and an
+ * at-least-once `broker`'s retry buffer -- both are "hold it and work
+ * through it later," just with a different reason for existing. */
+interface QueueEntry {
+  opType: OpType
+  /** Remaining backlog size, in items (not rps) -- rps is a rate, a
+   * backlog is a quantity, so ticks need to convert between them via
+   * tickMs to add/remove from this consistently. */
+  items: number
+  latencyMsAtEnqueue: number
+  enqueuedAtMs: number
+}
+
+/** What actually got drained this tick, per originating entry -- a single
+ * tick's drain can span multiple differently-aged entries, each with its
+ * own opType/latency-so-far/actual wait time, so these can't be collapsed
+ * into one blended number without losing per-item correctness. */
+interface DrainedPortion {
+  opType: OpType
+  rps: number
+  latencyMsAtEnqueue: number
+  waitMs: number
+}
+
+/** Drains up to `drainCapacityItems` from the front of a FIFO backlog
+ * (oldest entries first), mutating `backlog` in place. A backlog that
+ * isn't fully drained keeps its remaining items at the front, so their
+ * wait time keeps growing correctly on later ticks -- this is a real FIFO
+ * queue simulation, not a Little's-law estimate. */
+function drainBacklog(
+  backlog: QueueEntry[],
+  drainCapacityItems: number,
+  tMs: number,
+  tickMs: number,
+): DrainedPortion[] {
+  const tickSec = tickMs / 1000
+  const portions: DrainedPortion[] = []
+  let remaining = drainCapacityItems
+  // Read forward by index instead of repeatedly shift()-ing (each shift()
+  // re-indexes the whole remaining array); fully-drained entries are
+  // removed with one splice after the loop instead of one per entry.
+  let fullyDrainedCount = 0
+  while (remaining > EPS && fullyDrainedCount < backlog.length) {
+    const entry = backlog[fullyDrainedCount]
+    const drained = Math.min(entry.items, remaining)
+    entry.items -= drained
+    remaining -= drained
+    portions.push({
+      opType: entry.opType,
+      rps: drained / tickSec,
+      latencyMsAtEnqueue: entry.latencyMsAtEnqueue,
+      waitMs: tMs - entry.enqueuedAtMs,
+    })
+    if (entry.items <= EPS) fullyDrainedCount += 1
+  }
+  if (fullyDrainedCount > 0) backlog.splice(0, fullyDrainedCount)
+  return portions
+}
+
+/** Splits `totalAmount` (items) proportionally across `incoming` segments by
+ * each one's own share of it, accepting what fits under `roomItems` into
+ * `backlog` and returning the unaccepted remainder (in the same unit as
+ * `totalAmount`). Shared by `queue`'s arrival-acceptance and `broker`'s
+ * atLeastOnce retry-acceptance -- both are "how much of this incoming
+ * traffic fits in a capped backlog," just with a different source for
+ * `totalAmount` and `segAmount`. */
+function acceptIntoBacklog(
+  backlog: QueueEntry[],
+  incoming: Segment[],
+  totalAmount: number,
+  roomItems: number,
+  tMs: number,
+  segAmount: (seg: Segment) => number,
+): number {
+  const acceptRatio = totalAmount > EPS ? Math.min(1, roomItems / totalAmount) : 0
+  let overflow = 0
+  for (const seg of incoming) {
+    const amount = segAmount(seg)
+    const accepted = amount * acceptRatio
+    overflow += amount - accepted
+    if (accepted > EPS) {
+      backlog.push({ opType: seg.opType, items: accepted, latencyMsAtEnqueue: seg.latencyMs, enqueuedAtMs: tMs })
+    }
+  }
+  return overflow
+}
 
 export function validateGraph(graph: SimGraph): SimValidationError[] {
   const errors: SimValidationError[] = []
@@ -187,6 +279,48 @@ function settleSegment(
   }
 }
 
+/** Shared math for every node kind that's just "a capacity/latency box with
+ * no special-cased downstream behavior" -- server, apiGateway, and service
+ * all reduce to exactly this (see ServiceConfig's own comment on why
+ * `service` doesn't need anything more). A correctness fix here applies to
+ * all three at once instead of needing to be found and copied three times. */
+function runCapacityLimitedNode(
+  nodeId: string,
+  tMs: number,
+  cfg: { capacityRps: number; baseMs: number },
+  killed: boolean,
+  incoming: Segment[] | undefined,
+  totalInbound: number,
+  outEdges: GraphEdge[],
+  partitionedOff: boolean,
+  arrivals: Map<string, Segment[]>,
+  terminatedThisTick: WeightedSample[],
+  allTerminatedWrites: WeightedSample[],
+  utilizationByNode: Map<string, { sum: number; max: number; count: number }>,
+  nodeTicks: NodeTickMetric[],
+): number {
+  const effectiveCapacity = killed ? 0 : cfg.capacityRps
+  const utilization = effectiveCapacity > 0 ? totalInbound / effectiveCapacity : totalInbound > 0 ? 1 : 0
+  const serviceMs = effectiveCapacity > 0 ? serviceTimeMs(cfg.baseMs, utilization) : cfg.baseMs
+  const errorRps = Math.max(0, totalInbound - effectiveCapacity)
+  const survivingFraction = totalInbound > EPS ? Math.max(0, 1 - errorRps / totalInbound) : 1
+
+  const settleStats: SettleStats = { errorRps: 0 }
+  for (const seg of incoming ?? []) {
+    settleSegment(seg, survivingFraction, serviceMs, outEdges, partitionedOff, arrivals, terminatedThisTick, allTerminatedWrites, settleStats)
+  }
+  const ownErrorRps = errorRps + settleStats.errorRps
+
+  const stats = utilizationByNode.get(nodeId) ?? { sum: 0, max: 0, count: 0 }
+  stats.sum += utilization
+  stats.max = Math.max(stats.max, utilization)
+  stats.count += 1
+  utilizationByNode.set(nodeId, stats)
+
+  nodeTicks.push({ nodeId, tMs, inboundRps: totalInbound, utilization, serviceMs, errorRps: ownErrorRps })
+  return ownErrorRps
+}
+
 /** Static per-target weights for hash-based routing: deterministic but not
  * perfectly even, so a hash router can be visibly lumpier than round robin
  * even before Chapter II introduces the fix (virtual nodes / consistent hashing). */
@@ -278,6 +412,11 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
   const utilizationByNode = new Map<string, { sum: number; max: number; count: number }>()
   // routerId -> childId -> running inbound stats, used for maxShardImbalance.
   const shardChildStats = new Map<string, Map<string, { sum: number; count: number }>>()
+  // Persists across ticks -- a queue's whole point is holding work that
+  // outlives the tick it arrived in.
+  const queueBacklogByNode = new Map<string, QueueEntry[]>()
+  const brokerRetryBacklogByNode = new Map<string, QueueEntry[]>()
+  let maxQueueDepth = 0
 
   const clientNode = graph.nodes.find((n) => n.config.kind === 'client')!
   const writeFraction = Math.min(Math.max(workload.writeFraction ?? 0, 0), 1)
@@ -342,37 +481,21 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
 
       if (node.config.kind === 'server') {
         const cfg = node.config as ServerConfig
-        const effectiveCapacity = killedNodeIds.has(nodeId) ? 0 : cfg.capacityRps
-        const utilization = effectiveCapacity > 0 ? totalInbound / effectiveCapacity : totalInbound > 0 ? 1 : 0
-        const serviceMs = effectiveCapacity > 0 ? serviceTimeMs(cfg.baseMs, utilization) : cfg.baseMs
-        const errorRps = Math.max(0, totalInbound - effectiveCapacity)
-        const survivingFraction = totalInbound > EPS ? Math.max(0, 1 - errorRps / totalInbound) : 1
-
-        errorRpsThisTick += errorRps
-
-        const settleStats: SettleStats = { errorRps: 0 }
-        for (const seg of incoming ?? []) {
-          settleSegment(
-            seg,
-            survivingFraction,
-            serviceMs,
-            outEdges,
-            partitionedOff,
-            arrivals,
-            terminatedThisTick,
-            allTerminatedWrites,
-            settleStats,
-          )
-        }
-        errorRpsThisTick += settleStats.errorRps
-
-        const stats = utilizationByNode.get(nodeId) ?? { sum: 0, max: 0, count: 0 }
-        stats.sum += utilization
-        stats.max = Math.max(stats.max, utilization)
-        stats.count += 1
-        utilizationByNode.set(nodeId, stats)
-
-        nodeTicks.push({ nodeId, tMs, inboundRps: totalInbound, utilization, serviceMs, errorRps: errorRps + settleStats.errorRps })
+        errorRpsThisTick += runCapacityLimitedNode(
+          nodeId,
+          tMs,
+          cfg,
+          killedNodeIds.has(nodeId),
+          incoming,
+          totalInbound,
+          outEdges,
+          partitionedOff,
+          arrivals,
+          terminatedThisTick,
+          allTerminatedWrites,
+          utilizationByNode,
+          nodeTicks,
+        )
         continue
       }
 
@@ -727,6 +850,237 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
         })
         continue
       }
+
+      if (node.config.kind === 'queue') {
+        const cfg = node.config as QueueConfig
+        const killed = killedNodeIds.has(nodeId)
+        const tickSec = workload.tickMs / 1000
+        const backlog = queueBacklogByNode.get(nodeId) ?? []
+
+        // Accept new arrivals before draining, so light (under-drainRps)
+        // load passes through with near-zero added wait -- a queue should
+        // look almost transparent right up until it's actually needed.
+        // Overflow beyond `capacity` is real backpressure: dropped, not
+        // queued, same as any other capacity-limited node dropping excess.
+        const existingDepth = backlog.reduce((acc, e) => acc + e.items, 0)
+        const roomItems = killed ? 0 : Math.max(0, cfg.capacity - existingDepth)
+        const arrivedItems = totalInbound * tickSec
+        const overflowItems = acceptIntoBacklog(backlog, incoming ?? [], arrivedItems, roomItems, tMs, (seg) => seg.rps * tickSec)
+
+        // The real peak this tick is right after arrivals are pushed but
+        // before drain runs -- neither existingDepth (before the push) nor
+        // depthAfter (after the drain) captures it.
+        const depthAfterPush = backlog.reduce((acc, e) => acc + e.items, 0)
+
+        const drainCapacityItems = killed ? 0 : cfg.drainRps * tickSec
+        const drainedPortions = drainBacklog(backlog, drainCapacityItems, tMs, workload.tickMs)
+        queueBacklogByNode.set(nodeId, backlog)
+
+        const depthAfter = backlog.reduce((acc, e) => acc + e.items, 0)
+        maxQueueDepth = Math.max(maxQueueDepth, existingDepth, depthAfterPush, depthAfter)
+
+        const overflowRps = overflowItems / tickSec
+        errorRpsThisTick += overflowRps
+
+        const settleStats: SettleStats = { errorRps: 0 }
+        let waitWeightedSum = 0
+        let drainedRpsTotal = 0
+        for (const portion of drainedPortions) {
+          const seg: Segment = { rps: portion.rps, latencyMs: portion.latencyMsAtEnqueue, opType: portion.opType }
+          settleSegment(
+            seg,
+            1,
+            portion.waitMs + PASS_THROUGH_MS,
+            outEdges,
+            partitionedOff,
+            arrivals,
+            terminatedThisTick,
+            allTerminatedWrites,
+            settleStats,
+          )
+          waitWeightedSum += portion.waitMs * portion.rps
+          drainedRpsTotal += portion.rps
+        }
+        errorRpsThisTick += settleStats.errorRps
+
+        const avgWaitMs = drainedRpsTotal > EPS ? waitWeightedSum / drainedRpsTotal : 0
+        const utilization = cfg.capacity > 0 ? depthAfter / cfg.capacity : 0
+        const stats = utilizationByNode.get(nodeId) ?? { sum: 0, max: 0, count: 0 }
+        stats.sum += utilization
+        stats.max = Math.max(stats.max, utilization)
+        stats.count += 1
+        utilizationByNode.set(nodeId, stats)
+
+        nodeTicks.push({
+          nodeId,
+          tMs,
+          inboundRps: totalInbound,
+          utilization,
+          serviceMs: avgWaitMs,
+          errorRps: overflowRps + settleStats.errorRps,
+          queueDepth: depthAfter,
+        })
+        continue
+      }
+
+      if (node.config.kind === 'broker') {
+        const cfg = node.config as BrokerConfig
+        const killed = killedNodeIds.has(nodeId)
+        const tickSec = workload.tickMs / 1000
+        const effectiveCapacity = killed ? 0 : cfg.capacityRps
+        const utilization = effectiveCapacity > 0 ? totalInbound / effectiveCapacity : totalInbound > 0 ? 1 : 0
+        const serviceMs = effectiveCapacity > 0 ? serviceTimeMs(cfg.baseMs, utilization) : cfg.baseMs
+        const overloadErrorRps = Math.max(0, totalInbound - effectiveCapacity)
+        const survivingFraction = totalInbound > EPS ? Math.max(0, 1 - overloadErrorRps / totalInbound) : 1
+
+        const settleStats: SettleStats = { errorRps: 0 }
+        let depthAfter = 0
+        let ownErrorRps = 0
+
+        // Every outgoing edge is an independent subscriber that gets its
+        // own full copy of surviving traffic -- settleSegment already does
+        // exactly that when handed every edge at once (it doesn't split
+        // rps across multiple edges the way loadBalancer's own weighted
+        // dispatch does), so pub-sub fan-out needs no special-casing here.
+        for (const seg of incoming ?? []) {
+          const survivingRps = seg.rps * survivingFraction
+          if (survivingRps > EPS) {
+            settleSegment(
+              { ...seg, rps: survivingRps },
+              1,
+              serviceMs,
+              outEdges,
+              partitionedOff,
+              arrivals,
+              terminatedThisTick,
+              allTerminatedWrites,
+              settleStats,
+            )
+          }
+        }
+
+        if (cfg.deliverySemantics === 'atMostOnce') {
+          // Fire-and-forget: whatever the broker couldn't dispatch this
+          // tick is simply lost, no different from any other capacity-
+          // limited node dropping its excess.
+          ownErrorRps += overloadErrorRps
+        } else if (killed) {
+          // atLeastOnce, but down: nothing new is accepted and nothing
+          // drains -- but the backlog that was already there doesn't
+          // vanish just because we stop touching it, so it still has to
+          // be reported as depth, not silently zeroed.
+          const backlog = brokerRetryBacklogByNode.get(nodeId) ?? []
+          depthAfter = backlog.reduce((acc, e) => acc + e.items, 0)
+          maxQueueDepth = Math.max(maxQueueDepth, depthAfter)
+          ownErrorRps += overloadErrorRps
+        } else {
+          // atLeastOnce: whatever overflowed the broker's own dispatch
+          // capacity goes into a small bounded retry backlog instead of
+          // being dropped outright -- reusing the exact same FIFO
+          // mechanic `queue` uses, since "hold it and retry" is the same
+          // shape of problem either way.
+          const backlog = brokerRetryBacklogByNode.get(nodeId) ?? []
+          const existingBacklogDepth = backlog.reduce((acc, e) => acc + e.items, 0)
+          const roomItems = Math.max(0, cfg.retryBufferCapacity - existingBacklogDepth)
+          const overflowItemsTotal = overloadErrorRps * tickSec
+          const totalInboundShare = (seg: Segment) =>
+            overflowItemsTotal * (totalInbound > EPS ? seg.rps / totalInbound : 0)
+          const overflowRemainder = acceptIntoBacklog(backlog, incoming ?? [], overflowItemsTotal, roomItems, tMs, totalInboundShare)
+          ownErrorRps += overflowRemainder / tickSec
+
+          // The real peak this tick is right after overflow is pushed but
+          // before this tick's own retry-drain runs.
+          const depthAfterPush = backlog.reduce((acc, e) => acc + e.items, 0)
+
+          // Retry with whatever dispatch capacity this tick's fresh
+          // traffic didn't already use.
+          const spentCapacityRps = Math.min(totalInbound, effectiveCapacity)
+          const spareCapacityItems = Math.max(0, effectiveCapacity - spentCapacityRps) * tickSec
+          const drainedPortions = drainBacklog(backlog, spareCapacityItems, tMs, workload.tickMs)
+          brokerRetryBacklogByNode.set(nodeId, backlog)
+          depthAfter = backlog.reduce((acc, e) => acc + e.items, 0)
+          maxQueueDepth = Math.max(maxQueueDepth, existingBacklogDepth, depthAfterPush, depthAfter)
+
+          for (const portion of drainedPortions) {
+            const seg: Segment = { rps: portion.rps, latencyMs: portion.latencyMsAtEnqueue, opType: portion.opType }
+            settleSegment(
+              seg,
+              1,
+              portion.waitMs + serviceMs,
+              outEdges,
+              partitionedOff,
+              arrivals,
+              terminatedThisTick,
+              allTerminatedWrites,
+              settleStats,
+            )
+          }
+        }
+        ownErrorRps += settleStats.errorRps
+        errorRpsThisTick += ownErrorRps
+
+        const stats = utilizationByNode.get(nodeId) ?? { sum: 0, max: 0, count: 0 }
+        stats.sum += utilization
+        stats.max = Math.max(stats.max, utilization)
+        stats.count += 1
+        utilizationByNode.set(nodeId, stats)
+
+        nodeTicks.push({
+          nodeId,
+          tMs,
+          inboundRps: totalInbound,
+          utilization,
+          serviceMs,
+          errorRps: ownErrorRps,
+          queueDepth: cfg.deliverySemantics === 'atLeastOnce' ? depthAfter : undefined,
+        })
+        continue
+      }
+
+      if (node.config.kind === 'apiGateway') {
+        const cfg = node.config as ApiGatewayConfig
+        errorRpsThisTick += runCapacityLimitedNode(
+          nodeId,
+          tMs,
+          cfg,
+          killedNodeIds.has(nodeId),
+          incoming,
+          totalInbound,
+          outEdges,
+          partitionedOff,
+          arrivals,
+          terminatedThisTick,
+          allTerminatedWrites,
+          utilizationByNode,
+          nodeTicks,
+        )
+        continue
+      }
+
+      if (node.config.kind === 'service') {
+        // Identical math to `server` -- a service is a server meant to be
+        // chained to other services/databases via ordinary edges, which is
+        // what makes cascading failure and monolith-vs-microservices
+        // comparisons fall out of existing machinery instead of needing a
+        // separate "dependency" concept (see ServiceConfig's own comment).
+        const cfg = node.config as ServiceConfig
+        errorRpsThisTick += runCapacityLimitedNode(
+          nodeId,
+          tMs,
+          cfg,
+          killedNodeIds.has(nodeId),
+          incoming,
+          totalInbound,
+          outEdges,
+          partitionedOff,
+          arrivals,
+          terminatedThisTick,
+          allTerminatedWrites,
+          utilizationByNode,
+          nodeTicks,
+        )
+        continue
+      }
     }
 
     const completedRps = terminatedThisTick.reduce((acc, s) => acc + s.weight, 0)
@@ -752,7 +1106,11 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
       n.config.kind === 'cache' ||
       n.config.kind === 'database' ||
       n.config.kind === 'replica' ||
-      n.config.kind === 'shardRouter'
+      n.config.kind === 'shardRouter' ||
+      n.config.kind === 'queue' ||
+      n.config.kind === 'broker' ||
+      n.config.kind === 'apiGateway' ||
+      n.config.kind === 'service'
     ) {
       return acc + n.config.costPerHour
     }
@@ -806,6 +1164,7 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
     writeP99Ms: weightedPercentile(allTerminatedWrites, 0.99),
     maxShardImbalance,
     maxReplicationLagMs,
+    maxQueueDepth,
   }
 
   return { ticks, nodeTicks, aggregate }

@@ -1,11 +1,15 @@
 import { X } from 'lucide-react'
 import type {
+  ApiGatewayConfig,
+  BrokerConfig,
   CacheConfig,
   DatabaseConfig,
   LoadBalancerConfig,
   NodeConfig,
+  QueueConfig,
   ReplicaConfig,
   ServerConfig,
+  ServiceConfig,
   ShardRouterConfig,
 } from '@/engine/types'
 import { COMPONENT_REGISTRY } from '@/engine/components'
@@ -68,6 +72,10 @@ export function NodeInspector({
         {config.kind === 'database' && <DatabaseFields config={config} onChange={(c) => onChange(c)} />}
         {config.kind === 'replica' && <ReplicaFields config={config} onChange={(c) => onChange(c)} />}
         {config.kind === 'shardRouter' && <ShardRouterFields config={config} onChange={(c) => onChange(c)} />}
+        {config.kind === 'queue' && <QueueFields config={config} onChange={(c) => onChange(c)} />}
+        {config.kind === 'broker' && <BrokerFields config={config} onChange={(c) => onChange(c)} />}
+        {config.kind === 'apiGateway' && <ApiGatewayFields config={config} onChange={(c) => onChange(c)} />}
+        {config.kind === 'service' && <ServiceFields config={config} onChange={(c) => onChange(c)} />}
         {config.kind === 'client' && (
           <p className="text-xs text-ink-400">This is where requests enter the system.</p>
         )}
@@ -353,6 +361,164 @@ function ShardRouterFields({
           step={0.1}
           value={config.zipfS}
           onChange={(e) => onChange({ ...config, zipfS: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label="Cost">
+        <span className={inputClass + ' opacity-70'}>${config.costPerHour}/hr</span>
+      </Field>
+    </>
+  )
+}
+
+function QueueFields({
+  config,
+  onChange,
+}: {
+  config: QueueConfig
+  onChange: (c: QueueConfig) => void
+}) {
+  return (
+    <>
+      <Field label={`Backlog capacity: ${config.capacity} items`}>
+        <input
+          type="range"
+          min={10}
+          max={1000}
+          step={10}
+          value={config.capacity}
+          onChange={(e) => onChange({ ...config, capacity: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={`Drain rate: ${config.drainRps} items/sec`}>
+        <input
+          type="range"
+          min={5}
+          max={300}
+          step={5}
+          value={config.drainRps}
+          onChange={(e) => onChange({ ...config, drainRps: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label="Cost">
+        <span className={inputClass + ' opacity-70'}>${config.costPerHour}/hr</span>
+      </Field>
+    </>
+  )
+}
+
+function BrokerFields({
+  config,
+  onChange,
+}: {
+  config: BrokerConfig
+  onChange: (c: BrokerConfig) => void
+}) {
+  return (
+    <>
+      <Field label="Delivery semantics">
+        <select
+          className={inputClass}
+          value={config.deliverySemantics}
+          onChange={(e) =>
+            onChange({ ...config, deliverySemantics: e.target.value as BrokerConfig['deliverySemantics'] })
+          }
+        >
+          <option value="atMostOnce">At most once (fire and forget)</option>
+          <option value="atLeastOnce">At least once (retries instead of dropping)</option>
+        </select>
+      </Field>
+      <Field label={`Dispatch capacity: ${config.capacityRps} rps`}>
+        <input
+          type="range"
+          min={5}
+          max={300}
+          step={5}
+          value={config.capacityRps}
+          onChange={(e) => onChange({ ...config, capacityRps: Number(e.target.value) })}
+        />
+      </Field>
+      {config.deliverySemantics === 'atLeastOnce' && (
+        <Field label={`Retry buffer: ${config.retryBufferCapacity} items`}>
+          <input
+            type="range"
+            min={10}
+            max={1000}
+            step={10}
+            value={config.retryBufferCapacity}
+            onChange={(e) => onChange({ ...config, retryBufferCapacity: Number(e.target.value) })}
+          />
+        </Field>
+      )}
+      <Field label="Cost">
+        <span className={inputClass + ' opacity-70'}>${config.costPerHour}/hr</span>
+      </Field>
+    </>
+  )
+}
+
+function ApiGatewayFields({
+  config,
+  onChange,
+}: {
+  config: ApiGatewayConfig
+  onChange: (c: ApiGatewayConfig) => void
+}) {
+  return (
+    <>
+      <Field label={`Capacity: ${config.capacityRps} rps`}>
+        <input
+          type="range"
+          min={5}
+          max={400}
+          step={5}
+          value={config.capacityRps}
+          onChange={(e) => onChange({ ...config, capacityRps: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={`Added hop latency: ${config.baseMs}ms`}>
+        <input
+          type="range"
+          min={5}
+          max={200}
+          step={5}
+          value={config.baseMs}
+          onChange={(e) => onChange({ ...config, baseMs: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label="Cost">
+        <span className={inputClass + ' opacity-70'}>${config.costPerHour}/hr</span>
+      </Field>
+    </>
+  )
+}
+
+function ServiceFields({
+  config,
+  onChange,
+}: {
+  config: ServiceConfig
+  onChange: (c: ServiceConfig) => void
+}) {
+  return (
+    <>
+      <Field label={`Capacity: ${config.capacityRps} rps`}>
+        <input
+          type="range"
+          min={5}
+          max={300}
+          step={5}
+          value={config.capacityRps}
+          onChange={(e) => onChange({ ...config, capacityRps: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={`Base service time: ${config.baseMs}ms`}>
+        <input
+          type="range"
+          min={10}
+          max={400}
+          step={10}
+          value={config.baseMs}
+          onChange={(e) => onChange({ ...config, baseMs: Number(e.target.value) })}
         />
       </Field>
       <Field label="Cost">

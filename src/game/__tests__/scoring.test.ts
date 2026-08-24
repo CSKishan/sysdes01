@@ -22,6 +22,7 @@ function fakeResult(overrides: Partial<SimResult['aggregate']>): SimResult {
       writeP99Ms: 0,
       maxShardImbalance: 1,
       maxReplicationLagMs: 0,
+      maxQueueDepth: 0,
       ...overrides,
     },
   }

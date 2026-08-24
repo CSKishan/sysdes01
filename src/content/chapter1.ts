@@ -5,7 +5,7 @@
 import type { Chapter, Level } from './types'
 import type { GraphNode, SimGraph } from '@/engine/types'
 import { constantTraffic, rampTraffic } from '@/engine/traffic'
-import { client, edge } from './graphHelpers'
+import { client, edge, loadBalancer } from './graphHelpers'
 
 function server(
   id: string,
@@ -24,15 +24,6 @@ function server(
       baseMs: overrides.baseMs ?? 80,
       costPerHour: overrides.costPerHour ?? 8,
     },
-  }
-}
-
-function loadBalancer(id: string, label: string, x: number, y: number): GraphNode {
-  return {
-    id,
-    label,
-    position: { x, y },
-    config: { kind: 'loadBalancer', algorithm: 'roundRobin', costPerHour: 4 },
   }
 }
 

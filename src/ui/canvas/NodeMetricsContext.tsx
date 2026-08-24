@@ -9,6 +9,7 @@ export interface LiveNodeMetric {
   errorRps: number
   cacheHitRate?: number
   inboundRps: number
+  queueDepth?: number
 }
 
 export type LiveMetricsMap = Record<string, LiveNodeMetric>

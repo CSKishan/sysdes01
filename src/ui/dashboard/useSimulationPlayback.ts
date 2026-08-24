@@ -86,6 +86,7 @@ export function useSimulationPlayback() {
             errorRps: nm.errorRps,
             cacheHitRate: nm.cacheHitRate,
             inboundRps: nm.inboundRps,
+            queueDepth: nm.queueDepth,
           }
         }
       }

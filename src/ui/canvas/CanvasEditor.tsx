@@ -184,5 +184,13 @@ function labelFor(kind: ComponentKind): string {
       return 'Ledger copy'
     case 'shardRouter':
       return 'Sorting desk'
+    case 'queue':
+      return 'Holding bay'
+    case 'broker':
+      return 'Dispatch board'
+    case 'apiGateway':
+      return 'Reception desk'
+    case 'service':
+      return 'Courier team'
   }
 }

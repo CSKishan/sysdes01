@@ -12,6 +12,7 @@ export type MetricKey =
   | 'durability'
   | 'replicationLag'
   | 'shardImbalance'
+  | 'queueDepth'
 
 // The six metrics every Chapter 0/1 level already relies on as its
 // implicit default (no level has ever authored `visibleMetrics`). The four
@@ -115,6 +116,9 @@ export function MetricsPanel({
           tone={result.aggregate.maxShardImbalance > 2 ? 'bad' : result.aggregate.maxShardImbalance > 1.3 ? 'warn' : 'ok'}
         />
       )}
+      {visibleMetrics.includes('queueDepth') && (
+        <StatTile label="Peak queue depth" value={`${Math.round(result.aggregate.maxQueueDepth)} items`} />
+      )}
     </div>
   )
 }
@@ -141,5 +145,7 @@ function labelFor(key: MetricKey): string {
       return 'Replication lag'
     case 'shardImbalance':
       return 'Shard imbalance'
+    case 'queueDepth':
+      return 'Peak queue depth'
   }
 }
