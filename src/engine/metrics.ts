@@ -129,9 +129,18 @@ export function computeSystemAvailability(graph: SimGraph): number {
       return availabilitySeries(own, availabilityParallel(...branchAvailabilities))
     }
 
-    if (node.config.kind === 'queue' || node.config.kind === 'service') {
+    if (
+      node.config.kind === 'queue' ||
+      node.config.kind === 'service' ||
+      node.config.kind === 'rateLimiter' ||
+      node.config.kind === 'circuitBreaker'
+    ) {
       // Same shape as `server`/`database`: a single chain, no fan-out
-      // redundancy of its own.
+      // redundancy of its own. A circuit breaker's whole point is
+      // resilience *behavior* (failing fast, recovering on its own
+      // schedule), not redundancy -- it doesn't change how many
+      // independent paths exist, so it composes the same way a plain
+      // pass-through box would.
       const own = node.config.availability ?? DEFAULT_SERVER_AVAILABILITY
       if (children.length === 0) return own
       return availabilitySeries(own, ...children.map((c) => walk(c, nextVisited)))

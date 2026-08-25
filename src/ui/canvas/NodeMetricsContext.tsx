@@ -3,6 +3,7 @@
 // doesn't force React Flow to rebuild its entire node array 4x/second.
 
 import { createContext, useContext } from 'react'
+import type { CircuitState } from '@/engine/types'
 
 export interface LiveNodeMetric {
   utilization: number
@@ -10,6 +11,7 @@ export interface LiveNodeMetric {
   cacheHitRate?: number
   inboundRps: number
   queueDepth?: number
+  circuitState?: CircuitState
 }
 
 export type LiveMetricsMap = Record<string, LiveNodeMetric>

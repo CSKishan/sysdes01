@@ -3,10 +3,12 @@ import type {
   ApiGatewayConfig,
   BrokerConfig,
   CacheConfig,
+  CircuitBreakerConfig,
   DatabaseConfig,
   LoadBalancerConfig,
   NodeConfig,
   QueueConfig,
+  RateLimiterConfig,
   ReplicaConfig,
   ServerConfig,
   ServiceConfig,
@@ -76,6 +78,8 @@ export function NodeInspector({
         {config.kind === 'broker' && <BrokerFields config={config} onChange={(c) => onChange(c)} />}
         {config.kind === 'apiGateway' && <ApiGatewayFields config={config} onChange={(c) => onChange(c)} />}
         {config.kind === 'service' && <ServiceFields config={config} onChange={(c) => onChange(c)} />}
+        {config.kind === 'rateLimiter' && <RateLimiterFields config={config} onChange={(c) => onChange(c)} />}
+        {config.kind === 'circuitBreaker' && <CircuitBreakerFields config={config} onChange={(c) => onChange(c)} />}
         {config.kind === 'client' && (
           <p className="text-xs text-ink-400">This is where requests enter the system.</p>
         )}
@@ -519,6 +523,129 @@ function ServiceFields({
           step={10}
           value={config.baseMs}
           onChange={(e) => onChange({ ...config, baseMs: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label="Cost">
+        <span className={inputClass + ' opacity-70'}>${config.costPerHour}/hr</span>
+      </Field>
+    </>
+  )
+}
+
+function RateLimiterFields({
+  config,
+  onChange,
+}: {
+  config: RateLimiterConfig
+  onChange: (c: RateLimiterConfig) => void
+}) {
+  return (
+    <>
+      <Field label="Algorithm">
+        <select
+          className={inputClass}
+          value={config.algorithm}
+          onChange={(e) => onChange({ ...config, algorithm: e.target.value as RateLimiterConfig['algorithm'] })}
+        >
+          <option value="tokenBucket">Token bucket (allows a burst, then throttles)</option>
+          <option value="leakyBucket">Leaky bucket (smooths every burst into wait time)</option>
+          <option value="slidingWindow">Sliding window (rolling recent-request budget)</option>
+        </select>
+      </Field>
+      <Field label={`Sustained rate: ${config.sustainedRps} rps`}>
+        <input
+          type="range"
+          min={5}
+          max={300}
+          step={5}
+          value={config.sustainedRps}
+          onChange={(e) => onChange({ ...config, sustainedRps: Number(e.target.value) })}
+        />
+      </Field>
+      {config.algorithm !== 'slidingWindow' && (
+        <Field
+          label={
+            config.algorithm === 'tokenBucket'
+              ? `Burst capacity: ${config.burstCapacity} tokens`
+              : `Bucket capacity: ${config.burstCapacity} items`
+          }
+        >
+          <input
+            type="range"
+            min={5}
+            max={500}
+            step={5}
+            value={config.burstCapacity}
+            onChange={(e) => onChange({ ...config, burstCapacity: Number(e.target.value) })}
+          />
+        </Field>
+      )}
+      {config.algorithm === 'slidingWindow' && (
+        <Field label={`Window: ${config.windowMs}ms`}>
+          <input
+            type="range"
+            min={100}
+            max={5000}
+            step={100}
+            value={config.windowMs}
+            onChange={(e) => onChange({ ...config, windowMs: Number(e.target.value) })}
+          />
+        </Field>
+      )}
+      <Field label="Cost">
+        <span className={inputClass + ' opacity-70'}>${config.costPerHour}/hr</span>
+      </Field>
+    </>
+  )
+}
+
+function CircuitBreakerFields({
+  config,
+  onChange,
+}: {
+  config: CircuitBreakerConfig
+  onChange: (c: CircuitBreakerConfig) => void
+}) {
+  return (
+    <>
+      <Field label={`Capacity: ${config.capacityRps} rps`}>
+        <input
+          type="range"
+          min={5}
+          max={300}
+          step={5}
+          value={config.capacityRps}
+          onChange={(e) => onChange({ ...config, capacityRps: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={`Trip threshold: ${Math.round(config.errorThreshold * 100)}% downstream errors`}>
+        <input
+          type="range"
+          min={5}
+          max={95}
+          step={5}
+          value={Math.round(config.errorThreshold * 100)}
+          onChange={(e) => onChange({ ...config, errorThreshold: Number(e.target.value) / 100 })}
+        />
+      </Field>
+      <Field label={`Open duration: ${config.openDurationMs}ms`}>
+        <input
+          type="range"
+          min={250}
+          max={10000}
+          step={250}
+          value={config.openDurationMs}
+          onChange={(e) => onChange({ ...config, openDurationMs: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={`Half-open trial: ${Math.round(config.halfOpenTrialFraction * 100)}% of traffic`}>
+        <input
+          type="range"
+          min={5}
+          max={50}
+          step={5}
+          value={Math.round(config.halfOpenTrialFraction * 100)}
+          onChange={(e) => onChange({ ...config, halfOpenTrialFraction: Number(e.target.value) / 100 })}
         />
       </Field>
       <Field label="Cost">

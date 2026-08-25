@@ -24,6 +24,8 @@ import type {
   ApiGatewayConfig,
   BrokerConfig,
   CacheConfig,
+  CircuitBreakerConfig,
+  CircuitState,
   DatabaseConfig,
   GraphEdge,
   GraphNode,
@@ -32,6 +34,7 @@ import type {
   NodeTickMetric,
   OpType,
   QueueConfig,
+  RateLimiterConfig,
   ReplicaConfig,
   ServerConfig,
   ServiceConfig,
@@ -144,6 +147,40 @@ function acceptIntoBacklog(
     }
   }
   return overflow
+}
+
+/** A downstream target's own error rate, averaged over its nodeTicks
+ * entries at or after `sinceMs`. Used by circuitBreaker to judge whether
+ * what it's protecting is currently healthy -- necessarily based on *past*
+ * ticks, since the engine processes a breaker before whatever it's wired
+ * to (topological order), so this tick's downstream outcome doesn't exist
+ * yet at the moment the breaker makes its own decision. Scans backward
+ * from the end of `nodeTicks` and stops once entries fall outside the
+ * window, bounding the cost to the window's own size instead of the whole
+ * run so far (nodeTicks is chronological, so tMs is non-increasing walking
+ * backward). */
+function recentErrorFraction(nodeTicks: NodeTickMetric[], targetNodeId: string, sinceMs: number): number {
+  let errorSum = 0
+  let inboundSum = 0
+  for (let i = nodeTicks.length - 1; i >= 0; i--) {
+    const entry = nodeTicks[i]
+    if (entry.tMs < sinceMs) break
+    if (entry.nodeId === targetNodeId) {
+      errorSum += entry.errorRps
+      inboundSum += entry.inboundRps
+    }
+  }
+  return inboundSum > EPS ? errorSum / inboundSum : 0
+}
+
+/** A retry scheduled to land back at an edge's target at a future tick. */
+interface PendingRetry {
+  rps: number
+  opType: OpType
+  /** Wall-clock tick this retry is due to be injected. */
+  scheduledAtMs: number
+  /** Backoff wait already baked into the retried segment's own latency. */
+  latencyMs: number
 }
 
 export function validateGraph(graph: SimGraph): SimValidationError[] {
@@ -271,8 +308,16 @@ function settleSegment(
     if (seg.opType === 'write') allTerminatedWrites.push({ value: latencyMs, weight: survivingRps })
     return
   }
-  const newSeg: Segment = { ...seg, rps: survivingRps, latencyMs: seg.latencyMs + addedLatencyMs }
   for (const edge of outEdges) {
+    // Cross-region cost is authored per edge (not auto-derived from node
+    // region tags), so it stays an honest, visible number instead of
+    // implicit magic -- and it's naturally per-edge here since this loop
+    // already runs once per outgoing edge.
+    const newSeg: Segment = {
+      ...seg,
+      rps: survivingRps,
+      latencyMs: seg.latencyMs + addedLatencyMs + (edge.crossRegionLatencyMs ?? 0),
+    }
     const list = arrivals.get(edge.target) ?? []
     list.push(newSeg)
     arrivals.set(edge.target, list)
@@ -416,10 +461,33 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
   // outlives the tick it arrived in.
   const queueBacklogByNode = new Map<string, QueueEntry[]>()
   const brokerRetryBacklogByNode = new Map<string, QueueEntry[]>()
+  const leakyBucketBacklogByNode = new Map<string, QueueEntry[]>()
   let maxQueueDepth = 0
+  // Rate limiter state: token bucket's running token count, and sliding
+  // window's rolling per-tick usage log.
+  const tokenBucketByNode = new Map<string, number>()
+  const slidingWindowByNode = new Map<string, { tMs: number; items: number }[]>()
+  // Circuit breaker state, keyed by the breaker's own node id.
+  const circuitStateByNode = new Map<string, CircuitState>()
+  const circuitOpenedAtMsByNode = new Map<string, number>()
+  const circuitHalfOpenedAtMsByNode = new Map<string, number>()
+  // Retries: pending injections due at a future tick, and how many
+  // consecutive backoff-hops the current trouble streak has used, per edge.
+  const pendingRetriesByEdge = new Map<string, PendingRetry[]>()
+  const retryStreakByEdge = new Map<string, number>()
 
   const clientNode = graph.nodes.find((n) => n.config.kind === 'client')!
   const writeFraction = Math.min(Math.max(workload.writeFraction ?? 0, 0), 1)
+  // Precomputed once (the graph's own region tags don't change mid-run) so
+  // a killRegionIds incident doesn't have to re-scan every node every tick.
+  const nodeIdsByRegion = new Map<string, string[]>()
+  for (const n of graph.nodes) {
+    if (!n.region) continue
+    const list = nodeIdsByRegion.get(n.region) ?? []
+    list.push(n.id)
+    nodeIdsByRegion.set(n.region, list)
+  }
+  const retryEdges = graph.edges.filter((e) => e.retry)
 
   for (let tMs = 0; tMs < workload.durationMs; tMs += workload.tickMs) {
     const incidentsNow = activeIncidents(incidents, tMs)
@@ -428,6 +496,9 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
       1,
     )
     const killedNodeIds = new Set(incidentsNow.flatMap((i) => i.killNodeIds ?? []))
+    for (const regionId of incidentsNow.flatMap((i) => i.killRegionIds ?? [])) {
+      for (const id of nodeIdsByRegion.get(regionId) ?? []) killedNodeIds.add(id)
+    }
     const severedEdgeIds = new Set(incidentsNow.flatMap((i) => i.severedEdgeIds ?? []))
     const offeredRps = Math.max(0, workload.trafficCurve(tMs) * trafficMultiplier)
 
@@ -439,8 +510,28 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
     if (writeRps > EPS) initialSegments.push({ rps: writeRps, latencyMs: 0, opType: 'write' })
     arrivals.set(clientNode.id, initialSegments)
 
+    // Inject any retries that came due this tick, before the main
+    // per-node pass -- so a retried segment counts toward its target's
+    // totalInbound for this tick, exactly like a fresh arrival would.
+    for (const edge of retryEdges) {
+      const pending = pendingRetriesByEdge.get(edge.id)
+      if (!pending || pending.length === 0) continue
+      const due = pending.filter((p) => p.scheduledAtMs <= tMs)
+      if (due.length === 0) continue
+      pendingRetriesByEdge.set(
+        edge.id,
+        pending.filter((p) => p.scheduledAtMs > tMs),
+      )
+      const list = arrivals.get(edge.target) ?? []
+      for (const p of due) list.push({ rps: p.rps, latencyMs: p.latencyMs, opType: p.opType })
+      arrivals.set(edge.target, list)
+    }
+
     const terminatedThisTick: WeightedSample[] = []
     let errorRpsThisTick = 0
+    // Bounds the retry-scheduling lookup below to this tick's own entries
+    // (nodes-in-graph-sized) instead of a scan that grows with total ticks.
+    const nodeTicksBeforeThisTick = nodeTicks.length
 
     for (const nodeId of topo.order) {
       const node = nodeById.get(nodeId)!
@@ -465,7 +556,8 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
         }
         for (const edge of outEdges) {
           const list = arrivals.get(edge.target) ?? []
-          list.push(...(incoming ?? []))
+          const crossRegionMs = edge.crossRegionLatencyMs ?? 0
+          list.push(...(incoming ?? []).map((seg) => (crossRegionMs > 0 ? { ...seg, latencyMs: seg.latencyMs + crossRegionMs } : seg)))
           arrivals.set(edge.target, list)
         }
         nodeTicks.push({
@@ -664,13 +756,30 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
         }
 
         const targets = outEdges.map((e) => nodeById.get(e.target)!).filter(Boolean)
-        const weights = loadBalancerWeights(cfg.algorithm, targets)
+        // Service discovery, opt-in: a health-aware dispatcher excludes
+        // killed targets from routing entirely instead of blindly sending
+        // their static share into the void -- unlike a plain dispatcher,
+        // which has no idea a target is down (see LoadBalancerConfig.
+        // healthAware's own comment for why this defaults off).
+        const healthyTargets = cfg.healthAware ? targets.filter((t) => !killedNodeIds.has(t.id)) : targets
+        const healthyWeights = loadBalancerWeights(cfg.algorithm, healthyTargets)
+        const weightByTargetId = new Map(healthyTargets.map((t, i) => [t.id, healthyWeights[i] ?? 0]))
 
-        outEdges.forEach((edge, i) => {
-          const weight = weights[i] ?? 0
+        // Every target excluded (all killed): there's nowhere healthy left
+        // to route to, so the inbound has to register as dropped rather
+        // than silently vanishing from the tick's accounting.
+        const allExcluded = cfg.healthAware && targets.length > 0 && healthyTargets.length === 0
+        if (allExcluded) {
+          errorRpsThisTick += totalInbound
+          nodeTicks.push({ nodeId, tMs, inboundRps: totalInbound, utilization: 0, serviceMs: PASS_THROUGH_MS, errorRps: totalInbound })
+          continue
+        }
+
+        outEdges.forEach((edge) => {
+          const weight = weightByTargetId.get(edge.target) ?? 0
           for (const seg of incoming ?? []) {
             const list = arrivals.get(edge.target) ?? []
-            list.push({ ...seg, rps: seg.rps * weight, latencyMs: seg.latencyMs + PASS_THROUGH_MS })
+            list.push({ ...seg, rps: seg.rps * weight, latencyMs: seg.latencyMs + PASS_THROUGH_MS + (edge.crossRegionLatencyMs ?? 0) })
             arrivals.set(edge.target, list)
           }
         })
@@ -760,7 +869,7 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
           }
           for (const seg of incoming ?? []) {
             const list = arrivals.get(edge.target) ?? []
-            list.push({ ...seg, rps: seg.rps * weight, latencyMs: seg.latencyMs + PASS_THROUGH_MS })
+            list.push({ ...seg, rps: seg.rps * weight, latencyMs: seg.latencyMs + PASS_THROUGH_MS + (edge.crossRegionLatencyMs ?? 0) })
             arrivals.set(edge.target, list)
           }
           const entry = childStats.get(edge.target) ?? { sum: 0, count: 0 }
@@ -1081,6 +1190,233 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
         )
         continue
       }
+
+      if (node.config.kind === 'rateLimiter') {
+        const cfg = node.config as RateLimiterConfig
+        const killed = killedNodeIds.has(nodeId)
+        const tickSec = workload.tickMs / 1000
+        const arrivedItems = totalInbound * tickSec
+
+        if (cfg.algorithm === 'leakyBucket') {
+          // A leaky bucket *is* a queue with a fixed drain rate -- reuses
+          // the exact same FIFO backlog mechanic as `queue`, since it's
+          // the same shape of problem: smooth a burst into added wait
+          // time instead of rejecting it outright, up to a capacity.
+          const backlog = leakyBucketBacklogByNode.get(nodeId) ?? []
+          const existingDepth = backlog.reduce((acc, e) => acc + e.items, 0)
+          const roomItems = killed ? 0 : Math.max(0, cfg.burstCapacity - existingDepth)
+          const overflowItems = acceptIntoBacklog(backlog, incoming ?? [], arrivedItems, roomItems, tMs, (seg) => seg.rps * tickSec)
+          const depthAfterPush = backlog.reduce((acc, e) => acc + e.items, 0)
+          const drainCapacityItems = killed ? 0 : cfg.sustainedRps * tickSec
+          const drainedPortions = drainBacklog(backlog, drainCapacityItems, tMs, workload.tickMs)
+          leakyBucketBacklogByNode.set(nodeId, backlog)
+          const depthAfter = backlog.reduce((acc, e) => acc + e.items, 0)
+          maxQueueDepth = Math.max(maxQueueDepth, existingDepth, depthAfterPush, depthAfter)
+
+          const settleStats: SettleStats = { errorRps: 0 }
+          let waitWeightedSum = 0
+          let drainedRpsTotal = 0
+          for (const portion of drainedPortions) {
+            const seg: Segment = { rps: portion.rps, latencyMs: portion.latencyMsAtEnqueue, opType: portion.opType }
+            settleSegment(seg, 1, portion.waitMs + PASS_THROUGH_MS, outEdges, partitionedOff, arrivals, terminatedThisTick, allTerminatedWrites, settleStats)
+            waitWeightedSum += portion.waitMs * portion.rps
+            drainedRpsTotal += portion.rps
+          }
+          const ownErrorRps = overflowItems / tickSec + settleStats.errorRps
+          errorRpsThisTick += ownErrorRps
+
+          const avgWaitMs = drainedRpsTotal > EPS ? waitWeightedSum / drainedRpsTotal : 0
+          const utilization = cfg.burstCapacity > 0 ? depthAfter / cfg.burstCapacity : 0
+          const stats = utilizationByNode.get(nodeId) ?? { sum: 0, max: 0, count: 0 }
+          stats.sum += utilization
+          stats.max = Math.max(stats.max, utilization)
+          stats.count += 1
+          utilizationByNode.set(nodeId, stats)
+
+          nodeTicks.push({ nodeId, tMs, inboundRps: totalInbound, utilization, serviceMs: avgWaitMs, errorRps: ownErrorRps, queueDepth: depthAfter })
+          continue
+        }
+
+        // tokenBucket and slidingWindow both reduce to the same shape:
+        // "how many items can this tick actually spend against a budget,"
+        // just computed differently -- tokenBucket refills a scalar pool
+        // at a fixed rate (so a full bucket lets a burst through instantly,
+        // then throttles once drained); slidingWindow sums actual recent
+        // usage over a rolling window (so it re-derives room continuously
+        // rather than refilling on a fixed schedule). Both reject the
+        // excess outright rather than queueing it -- unlike leakyBucket,
+        // neither smooths a burst into latency.
+        let acceptedItems: number
+        let utilization: number
+        if (cfg.algorithm === 'tokenBucket') {
+          // Persisted balance is read/written regardless of `killed` -- an
+          // outage freezes refill and acceptance, but shouldn't discard
+          // tokens the node had already saved up, matching how leakyBucket's
+          // backlog and slidingWindow's log both survive a kill untouched.
+          const existingTokens = tokenBucketByNode.get(nodeId) ?? cfg.burstCapacity
+          const refilled = killed ? existingTokens : Math.min(cfg.burstCapacity, existingTokens + cfg.sustainedRps * tickSec)
+          acceptedItems = killed ? 0 : Math.min(arrivedItems, refilled)
+          const remainingTokens = refilled - acceptedItems
+          tokenBucketByNode.set(nodeId, remainingTokens)
+          utilization = cfg.burstCapacity > 0 ? 1 - remainingTokens / cfg.burstCapacity : 0
+        } else {
+          // slidingWindow
+          const log = slidingWindowByNode.get(nodeId) ?? []
+          const windowStart = tMs - cfg.windowMs
+          const trimmed = log.filter((e) => e.tMs > windowStart)
+          const windowBudgetItems = cfg.sustainedRps * (cfg.windowMs / 1000)
+          const alreadyUsed = trimmed.reduce((acc, e) => acc + e.items, 0)
+          const roomItems = killed ? 0 : Math.max(0, windowBudgetItems - alreadyUsed)
+          acceptedItems = Math.min(arrivedItems, roomItems)
+          if (acceptedItems > EPS) trimmed.push({ tMs, items: acceptedItems })
+          slidingWindowByNode.set(nodeId, trimmed)
+          utilization = windowBudgetItems > 0 ? Math.min(1, (alreadyUsed + acceptedItems) / windowBudgetItems) : 0
+        }
+
+        const overflowRps = (arrivedItems - acceptedItems) / tickSec
+        const settleStats: SettleStats = { errorRps: 0 }
+        if (acceptedItems > EPS && totalInbound > EPS) {
+          const acceptedFraction = acceptedItems / arrivedItems
+          for (const seg of incoming ?? []) {
+            settleSegment({ ...seg, rps: seg.rps * acceptedFraction }, 1, PASS_THROUGH_MS, outEdges, partitionedOff, arrivals, terminatedThisTick, allTerminatedWrites, settleStats)
+          }
+        }
+        const ownErrorRps = overflowRps + settleStats.errorRps
+        errorRpsThisTick += ownErrorRps
+
+        const stats = utilizationByNode.get(nodeId) ?? { sum: 0, max: 0, count: 0 }
+        stats.sum += utilization
+        stats.max = Math.max(stats.max, utilization)
+        stats.count += 1
+        utilizationByNode.set(nodeId, stats)
+
+        nodeTicks.push({ nodeId, tMs, inboundRps: totalInbound, utilization, serviceMs: PASS_THROUGH_MS, errorRps: ownErrorRps })
+        continue
+      }
+
+      if (node.config.kind === 'circuitBreaker') {
+        const cfg = node.config as CircuitBreakerConfig
+        const killed = killedNodeIds.has(nodeId)
+        let state = circuitStateByNode.get(nodeId) ?? 'closed'
+
+        if (state === 'open') {
+          const openedAt = circuitOpenedAtMsByNode.get(nodeId) ?? tMs
+          if (tMs - openedAt >= cfg.openDurationMs) {
+            state = 'halfOpen'
+            circuitHalfOpenedAtMsByNode.set(nodeId, tMs)
+          }
+        }
+
+        const allowedFraction = killed ? 0 : state === 'closed' ? 1 : state === 'open' ? 0 : cfg.halfOpenTrialFraction
+        const effectiveCapacity = killed ? 0 : cfg.capacityRps
+        const allowedRps = totalInbound * allowedFraction
+        const utilization = effectiveCapacity > 0 ? allowedRps / effectiveCapacity : 0
+        const serviceMs = effectiveCapacity > 0 ? serviceTimeMs(cfg.baseMs, utilization) : cfg.baseMs
+        const capacityErrorRps = Math.max(0, allowedRps - effectiveCapacity)
+        const survivingAllowedRps = allowedRps - capacityErrorRps
+
+        const settleStats: SettleStats = { errorRps: 0 }
+        if (survivingAllowedRps > EPS && totalInbound > EPS) {
+          const survivingFraction = survivingAllowedRps / totalInbound
+          for (const seg of incoming ?? []) {
+            settleSegment({ ...seg, rps: seg.rps * survivingFraction }, 1, serviceMs, outEdges, partitionedOff, arrivals, terminatedThisTick, allTerminatedWrites, settleStats)
+          }
+        }
+        // Fail-fast: whatever wasn't even let through never attempted the
+        // downstream call at all, same as capacity overload once allowed.
+        const rejectedRps = totalInbound - allowedRps
+        const ownErrorRps = rejectedRps + capacityErrorRps + settleStats.errorRps
+        errorRpsThisTick += ownErrorRps
+
+        if (state === 'closed') {
+          const windowStart = tMs - cfg.windowMs
+          const downstreamErrorFraction =
+            outEdges.length > 0 ? Math.max(...outEdges.map((e) => recentErrorFraction(nodeTicks, e.target, windowStart))) : 0
+          if (downstreamErrorFraction > cfg.errorThreshold) {
+            state = 'open'
+            circuitOpenedAtMsByNode.set(nodeId, tMs)
+          }
+        } else if (state === 'halfOpen') {
+          const halfOpenedAt = circuitHalfOpenedAtMsByNode.get(nodeId) ?? tMs
+          // Give the trial at least one tick of real trial traffic before
+          // judging it -- deciding at the instant of transition would just
+          // read the old (pre-trial) window, not the trial itself.
+          if (tMs > halfOpenedAt) {
+            const trialErrorFraction =
+              outEdges.length > 0 ? Math.max(...outEdges.map((e) => recentErrorFraction(nodeTicks, e.target, halfOpenedAt))) : 0
+            if (trialErrorFraction <= cfg.errorThreshold) {
+              state = 'closed'
+            } else {
+              state = 'open'
+              circuitOpenedAtMsByNode.set(nodeId, tMs)
+            }
+          }
+        }
+        circuitStateByNode.set(nodeId, state)
+
+        const stats = utilizationByNode.get(nodeId) ?? { sum: 0, max: 0, count: 0 }
+        stats.sum += utilization
+        stats.max = Math.max(stats.max, utilization)
+        stats.count += 1
+        utilizationByNode.set(nodeId, stats)
+
+        nodeTicks.push({ nodeId, tMs, inboundRps: totalInbound, utilization, serviceMs, errorRps: ownErrorRps, circuitState: state })
+        continue
+      }
+    }
+
+    // Schedule retries from whatever errored at each retry-configured
+    // edge's target this tick -- necessarily lagged by one tick, since the
+    // engine can't know this tick's outcome before processing it. Retried
+    // load stacks on top of new arrivals once it lands; if that pushes the
+    // target over capacity again, more errors, feeding a bigger retry next
+    // backoff-hop -- the retry storm.
+    //
+    // A retry-eligible failure is held OUT of this tick's client-facing
+    // errorRpsThisTick (and so out of totalErrors/ticks[].errorRps) while
+    // it's still pending a retry -- a request that's about to be retried
+    // hasn't actually failed from the client's point of view yet. It only
+    // becomes final once attempts are exhausted. The node's own nodeTicks
+    // entry is untouched, though: "this many requests failed AT ME this
+    // tick" is a true, honest per-component fact regardless of whether the
+    // caller retries -- exactly what a circuit breaker's own health check
+    // (recentErrorFraction) needs to see.
+    if (retryEdges.length > 0) {
+      const thisTickByNode = new Map(nodeTicks.slice(nodeTicksBeforeThisTick).map((n) => [n.nodeId, n]))
+      // A target's errorRps is a single aggregate, not broken down by which
+      // edge sent it -- if two retry-configured edges share a target,
+      // reading and re-claiming that same number for each would double-
+      // subtract from errorRpsThisTick and double-inject the retry. Only
+      // the first retry-configured edge to a given target claims its error
+      // this tick; a second edge to the same target waits for its own turn.
+      const claimedTargets = new Set<string>()
+      for (const edge of retryEdges) {
+        if (claimedTargets.has(edge.target)) continue
+        claimedTargets.add(edge.target)
+        const targetErrorRps = thisTickByNode.get(edge.target)?.errorRps ?? 0
+        if (targetErrorRps <= EPS) {
+          retryStreakByEdge.set(edge.id, 0)
+          continue
+        }
+        const streak = retryStreakByEdge.get(edge.id) ?? 0
+        if (streak >= edge.retry!.maxAttempts) {
+          // Exhausted: this chain of trouble is over, the error stands as
+          // final (already counted, left as is) -- a fresh chain of
+          // failures later gets its own attempts from scratch.
+          retryStreakByEdge.set(edge.id, 0)
+          continue
+        }
+        retryStreakByEdge.set(edge.id, streak + 1)
+        errorRpsThisTick -= targetErrorRps
+        const pending = pendingRetriesByEdge.get(edge.id) ?? []
+        pending.push({
+          rps: targetErrorRps,
+          opType: 'read',
+          scheduledAtMs: tMs + edge.retry!.backoffMs,
+          latencyMs: edge.retry!.backoffMs + (edge.crossRegionLatencyMs ?? 0),
+        })
+        pendingRetriesByEdge.set(edge.id, pending)
+      }
     }
 
     const completedRps = terminatedThisTick.reduce((acc, s) => acc + s.weight, 0)
@@ -1110,7 +1446,9 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
       n.config.kind === 'queue' ||
       n.config.kind === 'broker' ||
       n.config.kind === 'apiGateway' ||
-      n.config.kind === 'service'
+      n.config.kind === 'service' ||
+      n.config.kind === 'rateLimiter' ||
+      n.config.kind === 'circuitBreaker'
     ) {
       return acc + n.config.costPerHour
     }

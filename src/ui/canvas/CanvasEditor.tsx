@@ -192,5 +192,9 @@ function labelFor(kind: ComponentKind): string {
       return 'Reception desk'
     case 'service':
       return 'Courier team'
+    case 'rateLimiter':
+      return 'Intake window'
+    case 'circuitBreaker':
+      return 'Trip switch'
   }
 }

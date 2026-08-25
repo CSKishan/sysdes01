@@ -47,15 +47,25 @@ export function DebriefScreen({
 
         <div className="mb-5 flex flex-col gap-2">
           {score.checks.map((check) => (
-            <div
-              key={check.label}
-              className="flex items-center justify-between border border-ink-700 bg-ink-950/50 px-3 py-2 text-sm"
-            >
-              <span className="text-ink-300">{check.label}</span>
-              <span className="flex items-center gap-2">
-                <span className="font-mono tabular-nums text-ink-100">{check.actual}</span>
-                <Badge tone={check.passed ? 'ok' : 'bad'}>{check.target}</Badge>
-              </span>
+            <div key={check.label} className="border border-ink-700 bg-ink-950/50 px-3 py-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-ink-300">{check.label}</span>
+                <span className="flex items-center gap-2">
+                  <span className="font-mono tabular-nums text-ink-100">{check.actual}</span>
+                  <Badge tone={check.passed ? 'ok' : 'bad'}>{check.target}</Badge>
+                </span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-2">
+                <div className="h-1 flex-1 border border-ink-700 bg-ink-950">
+                  <div
+                    className={clsx('h-full', check.ratio <= 1 ? 'bg-ok-500' : 'bg-bad-500')}
+                    style={{ width: `${Math.min(100, check.ratio * 100)}%` }}
+                  />
+                </div>
+                <span className={clsx('font-mono text-[10px] tabular-nums', check.ratio <= 1 ? 'text-ink-500' : 'text-bad-500')}>
+                  {check.ratio.toFixed(1)}x budget
+                </span>
+              </div>
             </div>
           ))}
         </div>
