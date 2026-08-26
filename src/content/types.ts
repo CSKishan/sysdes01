@@ -66,6 +66,11 @@ export interface TeachStage {
   body: string[]
   diagram?: Diagram
   sequenceDiagram?: SequenceDiagram
+  /** Renders a one-off spatial visualizer instead of/alongside the above --
+   * a literal union (not a generic spec type) since so far exactly one
+   * topic (Geohashing and Quadtrees) needs one and it isn't a shape any
+   * other lesson would reuse. */
+  spatialVisualizer?: 'quadtree'
   readmeQuote: ReadmeQuote
   realWorldExamples: string[]
   check: ComprehensionCheck

@@ -140,19 +140,29 @@ function LoadBalancerFields({
   onChange: (c: LoadBalancerConfig) => void
 }) {
   return (
-    <Field label="Dispatch rule">
-      <select
-        className={inputClass}
-        value={config.algorithm}
-        onChange={(e) =>
-          onChange({ ...config, algorithm: e.target.value as LoadBalancerConfig['algorithm'] })
-        }
-      >
-        <option value="roundRobin">Round robin (take turns)</option>
-        <option value="leastConnections">Least busy first</option>
-        <option value="hash">Hash (always same depot for same order)</option>
-      </select>
-    </Field>
+    <>
+      <Field label="Dispatch rule">
+        <select
+          className={inputClass}
+          value={config.algorithm}
+          onChange={(e) =>
+            onChange({ ...config, algorithm: e.target.value as LoadBalancerConfig['algorithm'] })
+          }
+        >
+          <option value="roundRobin">Round robin (take turns)</option>
+          <option value="leastConnections">Least busy first</option>
+          <option value="hash">Hash (always same depot for same order)</option>
+        </select>
+      </Field>
+      <label className="flex items-center gap-2 text-xs text-ink-300">
+        <input
+          type="checkbox"
+          checked={config.healthAware ?? false}
+          onChange={(e) => onChange({ ...config, healthAware: e.target.checked })}
+        />
+        Health-aware (skip targets that are currently down)
+      </label>
+    </>
   )
 }
 

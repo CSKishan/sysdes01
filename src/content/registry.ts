@@ -6,10 +6,17 @@ import { CHAPTER_0, CHAPTER_0_LEVELS } from './chapter0'
 import { CHAPTER_1, CHAPTER_1_LEVELS } from './chapter1'
 import { CHAPTER_2, CHAPTER_2_LEVELS } from './chapter2'
 import { CHAPTER_3, CHAPTER_3_LEVELS } from './chapter3'
+import { CHAPTER_4, CHAPTER_4_LEVELS } from './chapter4'
 
-export const CHAPTERS: Chapter[] = [CHAPTER_0, CHAPTER_1, CHAPTER_2, CHAPTER_3].sort((a, b) => a.order - b.order)
+export const CHAPTERS: Chapter[] = [CHAPTER_0, CHAPTER_1, CHAPTER_2, CHAPTER_3, CHAPTER_4].sort((a, b) => a.order - b.order)
 
-export const ALL_LEVELS: Level[] = [...CHAPTER_0_LEVELS, ...CHAPTER_1_LEVELS, ...CHAPTER_2_LEVELS, ...CHAPTER_3_LEVELS]
+export const ALL_LEVELS: Level[] = [
+  ...CHAPTER_0_LEVELS,
+  ...CHAPTER_1_LEVELS,
+  ...CHAPTER_2_LEVELS,
+  ...CHAPTER_3_LEVELS,
+  ...CHAPTER_4_LEVELS,
+]
 
 const LEVEL_BY_ID = new Map(ALL_LEVELS.map((l) => [l.id, l]))
 
