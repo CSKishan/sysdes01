@@ -20,7 +20,25 @@ export type MetricKey =
 // shardImbalance) are opt-in only -- a level lists them explicitly once
 // they're actually relevant, instead of every existing dashboard suddenly
 // growing four new near-always-neutral tiles.
-const DEFAULT_METRICS: MetricKey[] = ['latency', 'throughput', 'errors', 'cost', 'cacheHitRate', 'availability']
+export const DEFAULT_METRICS: MetricKey[] = ['latency', 'throughput', 'errors', 'cost', 'cacheHitRate', 'availability']
+
+// Every metric tile there is -- for screens with no fixed target graph
+// (Sandbox, case-study design) where the player could wire in anything, so
+// there's no per-level SLO to derive relevance from the way
+// BuildStagePlayer does.
+export const ALL_METRICS: MetricKey[] = [
+  'latency',
+  'throughput',
+  'errors',
+  'cost',
+  'cacheHitRate',
+  'availability',
+  'writeLatency',
+  'durability',
+  'replicationLag',
+  'shardImbalance',
+  'queueDepth',
+]
 
 export function MetricsPanel({
   result,

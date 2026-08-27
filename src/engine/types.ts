@@ -13,6 +13,8 @@ export type ComponentKind =
   | 'broker'
   | 'apiGateway'
   | 'service'
+  | 'rateLimiter'
+  | 'circuitBreaker'
 
 export type LbAlgorithm = 'roundRobin' | 'leastConnections' | 'hash'
 export type CachePolicy = 'writeThrough' | 'writeAround' | 'writeBack'
@@ -20,6 +22,8 @@ export type DatabaseEngine = 'sql' | 'nosql'
 export type ReplicationMode = 'sync' | 'async'
 export type ShardStrategy = 'modulo' | 'consistentHash'
 export type DeliverySemantics = 'atMostOnce' | 'atLeastOnce'
+export type RateLimiterAlgorithm = 'tokenBucket' | 'leakyBucket' | 'slidingWindow'
+export type CircuitState = 'closed' | 'open' | 'halfOpen'
 
 /** Whether a traffic segment represents a read or a write. Every existing
  * component from Chapter I is opType-agnostic (a "depot" doesn't care) --
@@ -50,6 +54,15 @@ export interface LoadBalancerConfig {
   /** This node's own uptime, 0..1. A single dispatcher is a single point of
    * failure no matter how many redundant servers sit behind it. */
   availability?: number
+  /** When true, targets killed by an active incident are excluded from
+   * routing weights entirely -- service discovery: the dispatcher only
+   * sends traffic to targets it currently believes are healthy, instead of
+   * blindly trusting static wiring. Defaults to false/undefined so every
+   * load balancer authored before this field existed keeps routing evenly
+   * across a killed target's "share" exactly as it always did (redundancy
+   * alone shrinks the blast radius but doesn't remove it -- the honest
+   * lesson Chapter III's own microservices level teaches). */
+  healthAware?: boolean
 }
 
 export interface CacheConfig {
@@ -196,6 +209,45 @@ export interface ServiceConfig {
   availability?: number
 }
 
+export interface RateLimiterConfig {
+  kind: 'rateLimiter'
+  algorithm: RateLimiterAlgorithm
+  /** The steady-state throughput every algorithm converges to once a burst
+   * is absorbed: tokens refill at this rate, the leaky bucket drains at
+   * this rate, the sliding window's own budget is this rate * windowMs. */
+  sustainedRps: number
+  /** tokenBucket: how many tokens the bucket can hold -- how big a burst
+   * gets let through instantly, at full speed, before throttling down to
+   * sustainedRps. leakyBucket: how many items the bucket can hold before
+   * it overflows (rejects) instead of smoothing them into added latency --
+   * same shape as QueueConfig.capacity, since a leaky bucket *is* a queue
+   * with a fixed drain rate. Ignored under slidingWindow. */
+  burstCapacity: number
+  /** slidingWindow only: how far back the rolling request count looks, ms. */
+  windowMs: number
+  costPerHour: number
+  availability?: number
+}
+
+export interface CircuitBreakerConfig {
+  kind: 'circuitBreaker'
+  capacityRps: number
+  baseMs: number
+  costPerHour: number
+  availability?: number
+  /** Fraction (0..1) of the downstream's own recent error rate, averaged
+   * over `windowMs`, that trips the breaker open. */
+  errorThreshold: number
+  /** How far back to look when judging the downstream's recent health. */
+  windowMs: number
+  /** How long the breaker stays open (rejecting every request immediately,
+   * without even attempting the downstream call) before it lets a trial
+   * trickle through to test recovery. */
+  openDurationMs: number
+  /** Fraction (0..1) of traffic let through as a trial once half-open. */
+  halfOpenTrialFraction: number
+}
+
 export type NodeConfig =
   | ClientConfig
   | ServerConfig
@@ -208,6 +260,8 @@ export type NodeConfig =
   | BrokerConfig
   | ApiGatewayConfig
   | ServiceConfig
+  | RateLimiterConfig
+  | CircuitBreakerConfig
 
 export interface GraphNode {
   id: string
@@ -215,12 +269,39 @@ export interface GraphNode {
   config: NodeConfig
   /** Canvas position; irrelevant to simulation, kept here so layout survives saves. */
   position: { x: number; y: number }
+  /** Optional region tag (e.g. 'us-east', 'eu-west') for cross-region
+   * latency (GraphEdge.crossRegionLatencyMs) and regional-failover
+   * incidents (IncidentWindow.killRegionIds). Untagged nodes aren't part
+   * of any region-based mechanic. */
+  region?: string
+}
+
+export interface EdgeRetryConfig {
+  /** How many additional attempts to make after the first failure, before
+   * giving up and letting the error stand as final. */
+  maxAttempts: number
+  /** How long to wait before each retry attempt, ms. */
+  backoffMs: number
 }
 
 export interface GraphEdge {
   id: string
   source: string
   target: string
+  /** Extra one-way latency for this specific hop, ms -- authored explicitly
+   * on edges that cross regions, rather than auto-derived from node region
+   * tags, so it stays an honest, visible number instead of implicit magic. */
+  crossRegionLatencyMs?: number
+  /** Retries a portion of this edge's traffic that errored at its target,
+   * after a backoff, up to maxAttempts times. Modeled as a one-tick-lagged
+   * approximation -- this tick's retry load is sized from the target's
+   * *last* tick's observed error rate, since the engine can't know this
+   * tick's outcome before it happens. Retried load stacks on top of new
+   * arrivals at the target; if that pushes it over capacity, more errors,
+   * which schedules an even bigger retry next backoff -- the retry storm.
+   * Retries are treated as idempotent (opType 'read') -- retrying a write
+   * safely needs an idempotency key, a real distinction this doesn't model. */
+  retry?: EdgeRetryConfig
 }
 
 export interface SimGraph {
@@ -255,6 +336,10 @@ export interface IncidentWindow {
   /** Edge ids to treat as severed (no traffic crosses them) while active --
    * a network partition, as opposed to a node outright dying. */
   severedEdgeIds?: string[]
+  /** Kills every node tagged with any of these regions (GraphNode.region)
+   * while active -- a whole-region outage, for testing regional failover,
+   * without having to enumerate every node id in that region by hand. */
+  killRegionIds?: string[]
 }
 
 export interface NodeTickMetric {
@@ -265,9 +350,11 @@ export interface NodeTickMetric {
   serviceMs: number
   errorRps: number
   cacheHitRate?: number
-  /** Current backlog size (items), for a queue or an at-least-once
-   * broker's retry buffer. Undefined for every other node kind. */
+  /** Current backlog size (items), for a queue, an at-least-once broker's
+   * retry buffer, or a leaky-bucket rate limiter. Undefined otherwise. */
   queueDepth?: number
+  /** Current state, for a circuit breaker. Undefined for every other kind. */
+  circuitState?: CircuitState
 }
 
 export interface TickSummary {

@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { Link } from 'react-router-dom'
-import { Package, Target, BookOpen, BookMarked, FlaskConical, Check, Lock, Zap, Settings } from 'lucide-react'
+import { Package, Target, BookOpen, BookMarked, FlaskConical, Check, Lock, Zap, Settings, Briefcase } from 'lucide-react'
 import { CHAPTERS, getLevelsForChapter, isLevelUnlocked } from '@/content/registry'
 import { useProgressStore } from '@/game/progressStore'
 import { Panel } from '@/ui/shared/Panel'
@@ -55,6 +55,13 @@ export function ChapterMap({
             <FlaskConical className="h-3.5 w-3.5" strokeWidth={1.8} />
             Sandbox
           </Button>
+          <Link
+            to="/case-studies"
+            className="inline-flex items-center gap-2 border border-ink-700 bg-ink-800 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink-200 hover:border-brand-500/50 hover:text-ink-100"
+          >
+            <Briefcase className="h-3.5 w-3.5" strokeWidth={1.8} />
+            Case Studies
+          </Link>
           <Button variant="ghost" onClick={onOpenSettings} aria-label="Settings">
             <Settings className="h-3.5 w-3.5" strokeWidth={1.8} />
           </Button>

@@ -129,9 +129,18 @@ export function computeSystemAvailability(graph: SimGraph): number {
       return availabilitySeries(own, availabilityParallel(...branchAvailabilities))
     }
 
-    if (node.config.kind === 'queue' || node.config.kind === 'service') {
+    if (
+      node.config.kind === 'queue' ||
+      node.config.kind === 'service' ||
+      node.config.kind === 'rateLimiter' ||
+      node.config.kind === 'circuitBreaker'
+    ) {
       // Same shape as `server`/`database`: a single chain, no fan-out
-      // redundancy of its own.
+      // redundancy of its own. A circuit breaker's whole point is
+      // resilience *behavior* (failing fast, recovering on its own
+      // schedule), not redundancy -- it doesn't change how many
+      // independent paths exist, so it composes the same way a plain
+      // pass-through box would.
       const own = node.config.availability ?? DEFAULT_SERVER_AVAILABILITY
       if (children.length === 0) return own
       return availabilitySeries(own, ...children.map((c) => walk(c, nextVisited)))
@@ -168,7 +177,16 @@ export function computeSystemAvailability(graph: SimGraph): number {
 /** Every node id reachable from the client by following edges forward.
  * Used so an unwired, decorative node (dropped on the canvas but never
  * connected to anything) can't count toward a topology-derived metric --
- * it was never part of the system a write would actually reach. */
+ * it was never part of the system a write would actually reach.
+ *
+ * A near-duplicate of this same BFS lives in game/rubricScoring.ts, kept
+ * separate rather than shared across the engine/game boundary -- but the
+ * two aren't quite identical: this one seeds from a single client node
+ * (`.find`), rubricScoring's seeds from every client node (`.filter`).
+ * They agree today because every graph has exactly one client, but this
+ * engine already has region tags and multi-region incidents; if a
+ * multi-client graph ever exists, update both or they'll silently
+ * disagree on which nodes are reachable. */
 function reachableNodeIds(graph: SimGraph): Set<string> {
   const clientNode = graph.nodes.find((n) => n.config.kind === 'client')
   if (!clientNode) return new Set()

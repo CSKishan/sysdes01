@@ -23,8 +23,11 @@ export function ComponentNode({ id, data, selected }: NodeProps<FlowNode>) {
     data.config.kind === 'queue' ||
     data.config.kind === 'broker' ||
     data.config.kind === 'apiGateway' ||
-    data.config.kind === 'service'
+    data.config.kind === 'service' ||
+    data.config.kind === 'rateLimiter' ||
+    data.config.kind === 'circuitBreaker'
   const showsHitRate = data.config.kind === 'cache'
+  const showsCircuitState = data.config.kind === 'circuitBreaker'
 
   const utilization = metric?.utilization ?? 0
   const tone = utilizationTone(utilization)
@@ -50,6 +53,22 @@ export function ComponentNode({ id, data, selected }: NodeProps<FlowNode>) {
           </p>
         </div>
       </div>
+
+      {metric && showsCircuitState && metric.circuitState && (
+        <div className="flex items-center justify-between px-2.5 py-2">
+          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-400">State</span>
+          <span
+            className={clsx(
+              'border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide',
+              metric.circuitState === 'closed' && 'border-ok-500/40 text-ok-500',
+              metric.circuitState === 'halfOpen' && 'border-warn-500/40 text-warn-500',
+              metric.circuitState === 'open' && 'border-bad-500/40 text-bad-500',
+            )}
+          >
+            {metric.circuitState === 'halfOpen' ? 'Half-open' : metric.circuitState}
+          </span>
+        </div>
+      )}
 
       {metric && showsUtilization && (
         <div className="px-2.5 py-2">

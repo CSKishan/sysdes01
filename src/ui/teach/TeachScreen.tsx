@@ -3,6 +3,7 @@ import { Panel } from '@/ui/shared/Panel'
 import { RichParagraphs, RichText } from '@/ui/shared/RichText'
 import { MiniDiagram } from './MiniDiagram'
 import { SequenceDiagramView } from './SequenceDiagramView'
+import { QuadtreeVisualizer } from './QuadtreeVisualizer'
 import { ComprehensionCheck } from './ComprehensionCheck'
 
 export function TeachScreen({
@@ -23,6 +24,7 @@ export function TeachScreen({
 
         {stage.diagram && <MiniDiagram diagram={stage.diagram} />}
         {stage.sequenceDiagram && <SequenceDiagramView diagram={stage.sequenceDiagram} />}
+        {stage.spatialVisualizer === 'quadtree' && <QuadtreeVisualizer />}
 
         <blockquote className="mt-5 border-l-4 border-brand-500 bg-ink-950/50 py-3 pl-4 pr-3">
           <p className="text-sm italic text-ink-300">

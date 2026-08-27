@@ -7,6 +7,7 @@ import { Panel } from '@/ui/shared/Panel'
 import { Badge } from '@/ui/shared/Badge'
 import { MiniDiagram } from '@/ui/teach/MiniDiagram'
 import { SequenceDiagramView } from '@/ui/teach/SequenceDiagramView'
+import { QuadtreeVisualizer } from '@/ui/teach/QuadtreeVisualizer'
 import { RichParagraphs, RichText } from '@/ui/shared/RichText'
 import { LibraryLayout } from './LibraryLayout'
 
@@ -149,6 +150,7 @@ export function TopicPage() {
               <RichParagraphs paragraphs={stage.body} />
               {stage.diagram && <MiniDiagram diagram={stage.diagram} />}
               {stage.sequenceDiagram && <SequenceDiagramView diagram={stage.sequenceDiagram} />}
+              {stage.spatialVisualizer === 'quadtree' && <QuadtreeVisualizer />}
               <QuoteBlock quote={stage.readmeQuote.text} source={stage.readmeQuote.source} />
               <RealWorldExamples examples={stage.realWorldExamples} />
               <StaticCheck check={stage.check} />

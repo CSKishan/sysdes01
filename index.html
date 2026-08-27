@@ -11,6 +11,24 @@
       rel="stylesheet"
     />
     <title>Packet &amp; Post — Learn System Design</title>
+    <script>
+      // Apply the persisted theme before first paint, so a returning
+      // light-mode user doesn't see a flash of the dark default while
+      // React mounts and settingsStore rehydrates. Mirrors the zustand
+      // persist storage shape ({"state": {"theme": ...}, ...}) without
+      // depending on zustand itself -- this has to run before any
+      // module script loads. Failure (private browsing, corrupted
+      // JSON, etc.) just leaves the dark default in place.
+      (function () {
+        try {
+          var raw = localStorage.getItem('packet-and-post.settings')
+          var parsed = raw && JSON.parse(raw)
+          if (parsed && parsed.state && parsed.state.theme === 'light') {
+            document.documentElement.setAttribute('data-theme', 'light')
+          }
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

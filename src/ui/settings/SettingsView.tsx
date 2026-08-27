@@ -3,10 +3,12 @@
 // import) and the one display preference the game has (reduced motion).
 
 import { useRef, useState } from 'react'
-import { Settings, ArrowLeft, Download, Upload, RotateCcw, Check } from 'lucide-react'
+import clsx from 'clsx'
+import { Settings, ArrowLeft, Download, Upload, RotateCcw, Check, Sun, Moon } from 'lucide-react'
 import type { ComponentKind } from '@/engine/types'
 import { COMPONENT_REGISTRY } from '@/engine/components'
 import { useProgressStore, initialState as progressInitialState, type LevelStars } from '@/game/progressStore'
+import { useCaseStudyProgressStore, initialCaseStudyState } from '@/game/caseStudyProgressStore'
 import { useJournalStore } from '@/game/journalStore'
 import { useQuizStore } from '@/game/quizStore'
 import { useSettingsStore } from '@/game/settingsStore'
@@ -46,12 +48,28 @@ function sanitizeUnlockedKinds(value: unknown): ComponentKind[] {
   return Array.from(new Set<ComponentKind>(['client', ...known]))
 }
 
+/** Same corrupted-import guard as sanitizeStarsByLevelId, for rubric scores
+ * (must be a finite 0-100 number). */
+function sanitizeScoresByCaseStudyId(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object') return {}
+  const result: Record<string, number> = {}
+  for (const [caseStudyId, score] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 100) {
+      result[caseStudyId] = score
+    }
+  }
+  return result
+}
+
 export function SettingsView({ onBack }: { onBack: () => void }) {
   const progress = useProgressStore()
+  const caseStudyProgress = useCaseStudyProgressStore()
   const journal = useJournalStore()
   const quiz = useQuizStore()
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
   const setReducedMotion = useSettingsStore((s) => s.setReducedMotion)
+  const theme = useSettingsStore((s) => s.theme)
+  const setTheme = useSettingsStore((s) => s.setTheme)
 
   const [confirmingReset, setConfirmingReset] = useState(false)
   const [importMessage, setImportMessage] = useState<string | null>(null)
@@ -69,6 +87,10 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
       },
       journal: { entries: journal.entries },
       quiz: { sessions: quiz.sessions },
+      caseStudies: {
+        completedCaseStudyIds: caseStudyProgress.completedCaseStudyIds,
+        bestScorePercentByCaseStudyId: caseStudyProgress.bestScorePercentByCaseStudyId,
+      },
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -108,6 +130,14 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
       if (data.quiz && Array.isArray(data.quiz.sessions)) {
         useQuizStore.setState({ sessions: data.quiz.sessions })
       }
+      if (data.caseStudies && typeof data.caseStudies === 'object') {
+        useCaseStudyProgressStore.setState({
+          completedCaseStudyIds: Array.isArray(data.caseStudies.completedCaseStudyIds)
+            ? data.caseStudies.completedCaseStudyIds
+            : initialCaseStudyState.completedCaseStudyIds,
+          bestScorePercentByCaseStudyId: sanitizeScoresByCaseStudyId(data.caseStudies.bestScorePercentByCaseStudyId),
+        })
+      }
       setImportMessage('Imported successfully.')
     } catch {
       setImportMessage("Couldn't read that file — make sure it's a Packet & Post export.")
@@ -116,6 +146,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
 
   function handleReset() {
     progress.resetProgress()
+    caseStudyProgress.resetCaseStudyProgress()
     journal.clear()
     quiz.clear()
     setConfirmingReset(false)
@@ -137,9 +168,38 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
       <div className="flex flex-col gap-4">
         <Panel className="p-5">
           <h2 className="mb-1 text-sm font-semibold text-ink-100">Display</h2>
-          <p className="mb-3 text-sm text-ink-400">
-            Turn off the looping diagram and dashboard animations.
-          </p>
+          <p className="mb-3 text-sm text-ink-400">Theme, and whether things move.</p>
+          <div className="mb-4 flex items-center justify-between">
+            <span className="text-sm text-ink-200">Theme</span>
+            <div className="inline-flex border border-ink-700" role="radiogroup" aria-label="Theme">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={theme === 'dark'}
+                onClick={() => setTheme('dark')}
+                className={clsx(
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors',
+                  theme === 'dark' ? 'bg-brand-500 text-ink-950' : 'text-ink-400 hover:text-ink-100',
+                )}
+              >
+                <Moon className="h-3.5 w-3.5" strokeWidth={1.8} />
+                Dark
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={theme === 'light'}
+                onClick={() => setTheme('light')}
+                className={clsx(
+                  'flex items-center gap-1.5 border-l border-ink-700 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors',
+                  theme === 'light' ? 'bg-brand-500 text-ink-950' : 'text-ink-400 hover:text-ink-100',
+                )}
+              >
+                <Sun className="h-3.5 w-3.5" strokeWidth={1.8} />
+                Light
+              </button>
+            </div>
+          </div>
           <label className="flex items-center gap-2 text-sm text-ink-200">
             <input
               type="checkbox"
@@ -188,8 +248,9 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
         <Panel className="p-5">
           <h2 className="mb-1 text-sm font-semibold text-ink-100">Reset</h2>
           <p className="mb-3 text-sm text-ink-400">
-            Clears all completed levels, stars, unlocked components, your decision journal, and
-            your quiz history. This can't be undone unless you've exported a backup above.
+            Clears all completed levels, stars, unlocked components, case study progress, your
+            decision journal, and your quiz history. This can't be undone unless you've exported a
+            backup above.
           </p>
           {!confirmingReset ? (
             <Button variant="secondary" onClick={() => setConfirmingReset(true)}>

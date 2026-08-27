@@ -6,10 +6,12 @@ import type {
   ApiGatewayConfig,
   BrokerConfig,
   CacheConfig,
+  CircuitBreakerConfig,
   ComponentKind,
   DatabaseConfig,
   LoadBalancerConfig,
   QueueConfig,
+  RateLimiterConfig,
   ReplicaConfig,
   ServerConfig,
   ServiceConfig,
@@ -34,6 +36,8 @@ export interface ComponentDefinition {
     | BrokerConfig
     | ApiGatewayConfig
     | ServiceConfig
+    | RateLimiterConfig
+    | CircuitBreakerConfig
     | { kind: 'client' },
     never
   >
@@ -180,6 +184,36 @@ export const COMPONENT_REGISTRY: Record<ComponentKind, ComponentDefinition> = {
       capacityRps: 50,
       baseMs: 60,
       costPerHour: 9,
+    }),
+  },
+  rateLimiter: {
+    kind: 'rateLimiter',
+    realName: 'Rate limiter',
+    analogyName: 'The intake window',
+    shortDescription: 'Caps how fast orders get accepted, however they arrive.',
+    defaultConfig: (): RateLimiterConfig => ({
+      kind: 'rateLimiter',
+      algorithm: 'tokenBucket',
+      sustainedRps: 30,
+      burstCapacity: 60,
+      windowMs: 1000,
+      costPerHour: 4,
+    }),
+  },
+  circuitBreaker: {
+    kind: 'circuitBreaker',
+    realName: 'Circuit breaker',
+    analogyName: 'The trip switch',
+    shortDescription: 'Stops sending orders to a struggling depot, then tests if it has recovered.',
+    defaultConfig: (): CircuitBreakerConfig => ({
+      kind: 'circuitBreaker',
+      capacityRps: 100,
+      baseMs: 10,
+      costPerHour: 5,
+      errorThreshold: 0.5,
+      windowMs: 1000,
+      openDurationMs: 2000,
+      halfOpenTrialFraction: 0.1,
     }),
   },
 }

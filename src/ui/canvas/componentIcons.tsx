@@ -14,6 +14,8 @@ import {
   Radio,
   DoorOpen,
   Boxes,
+  Gauge,
+  ShieldAlert,
   type LucideIcon,
 } from 'lucide-react'
 import type { ComponentKind } from '@/engine/types'
@@ -30,4 +32,6 @@ export const COMPONENT_ICONS: Record<ComponentKind, LucideIcon> = {
   broker: Radio,
   apiGateway: DoorOpen,
   service: Boxes,
+  rateLimiter: Gauge,
+  circuitBreaker: ShieldAlert,
 }

@@ -43,6 +43,14 @@ export const AVAILABILITY_TABLE: NumberRow[] = [
   { label: '99.9999% ("six nines")', value: '~31.5 seconds/year downtime' },
 ]
 
+export const SLI_SLO_SLA_TABLE: NumberRow[] = [
+  { label: 'SLI (Indicator)', value: 'A measured number', note: 'e.g. "error rate," "p99 latency" -- what you actually track' },
+  { label: 'SLO (Objective)', value: 'A target for an SLI', note: 'e.g. "error rate ≤ 0.1%" -- your own internal goal' },
+  { label: 'SLA (Agreement)', value: 'An SLO with consequences', note: 'a contractual promise to a customer, usually looser than your SLO so you breach your own target before you breach theirs' },
+  { label: 'Error budget', value: '1 − SLO target', note: 'e.g. a 99.9% SLO leaves a 0.1% budget -- how much failure you\'re allowed before the SLO is broken' },
+  { label: 'Burn rate', value: 'actual ÷ allowed', note: '1.0x = using the budget at exactly the sustainable rate; 2.0x = exhausting it twice as fast (the debrief scorecard shows this per check)' },
+]
+
 export const CAPACITY_FIGURES: NumberRow[] = [
   { label: 'Seconds per day', value: '86,400', note: 'round to ~100,000 for quick mental math' },
   { label: 'Seconds per month', value: '~2.6 million' },
@@ -62,5 +70,6 @@ export const NUMBERS_SECTIONS: NumbersSection[] = [
   { id: 'latency', title: 'Latency ladder', rows: LATENCY_LADDER },
   { id: 'powers-of-two', title: 'Powers of two', rows: POWERS_OF_TWO },
   { id: 'availability', title: 'Availability & the nines', rows: AVAILABILITY_TABLE },
+  { id: 'sli-slo-sla', title: 'SLI, SLO, SLA & error budgets', rows: SLI_SLO_SLA_TABLE },
   { id: 'capacity', title: 'Capacity figures', rows: CAPACITY_FIGURES },
 ]
