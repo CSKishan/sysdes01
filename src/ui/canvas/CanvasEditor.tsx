@@ -27,6 +27,8 @@ import { NodeMetricsProvider, type LiveMetricsMap } from './NodeMetricsContext'
 import { Palette, PALETTE_DRAG_MIME } from './Palette'
 import { NodeInspector } from './NodeInspector'
 import { fromSimGraph, nextEdgeId, nextNodeId, toSimGraph, type FlowNode } from './flowAdapters'
+import { useSettingsStore } from '@/game/settingsStore'
+import { useThemeColor } from '@/ui/shared/useThemeColor'
 
 interface CanvasEditorProps {
   graph: SimGraph
@@ -65,6 +67,11 @@ function CanvasEditorInner({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const { screenToFlowPosition } = useReactFlow()
+  const theme = useSettingsStore((s) => s.theme)
+  // React Flow's own Controls/MiniMap chrome and this dot grid render as
+  // literal SVG/CSS attributes, not Tailwind classes, so they need the
+  // theme wired in directly instead of picking it up from the cascade.
+  const backgroundDotColor = useThemeColor('--color-ink-700')
 
   // Report graph changes to the parent from an effect, not from inside a
   // setState updater -- calling another component's setState synchronously
@@ -135,11 +142,11 @@ function CanvasEditorInner({
             onNodeClick={(_, node) => setSelectedNodeId(node.id)}
             onPaneClick={() => setSelectedNodeId(null)}
             nodeTypes={NODE_TYPES}
-            colorMode="dark"
+            colorMode={theme}
             fitView
             proOptions={{ hideAttribution: true }}
           >
-            <Background gap={16} color="#1c2733" />
+            <Background gap={16} color={backgroundDotColor} />
             <Controls showInteractive={false} />
           </ReactFlow>
         </NodeMetricsProvider>

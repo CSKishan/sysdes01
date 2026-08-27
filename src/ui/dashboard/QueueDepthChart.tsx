@@ -2,10 +2,12 @@ import { useMemo } from 'react'
 import { Line } from 'recharts'
 import type { SimResult } from '@/engine/types'
 import { TickLineChart } from './TickLineChart'
+import { useThemeColor } from '@/ui/shared/useThemeColor'
 
-// A handful of distinguishable line colors -- this game's graphs rarely
-// have more than two or three queue/broker nodes on screen at once.
-const LINE_COLORS = ['#f2b366', '#7c8aa5', '#5fd88f', '#e2685f']
+// The same handful of distinguishable line colors as everywhere else
+// (warn/muted-ink/ok/bad) -- this game's graphs rarely have more than two
+// or three queue/broker nodes on screen at once.
+const LINE_COLOR_VARS = ['--color-warn-500', '--color-ink-400', '--color-ok-500', '--color-bad-500']
 
 /** Backlog size over time for every queue/at-least-once-broker node in the
  * run -- the queue/broker counterpart to LatencyChart, since "did the
@@ -30,6 +32,16 @@ export function QueueDepthChart({ result, tickIndex }: { result: SimResult; tick
     return { nodeIds, byTick }
   }, [result])
 
+  // Fixed-size, unconditional hook calls (rules of hooks) -- called ahead
+  // of the early return below so the hook count never changes between
+  // renders regardless of how many node ids there turn out to be.
+  const lineColors = [
+    useThemeColor(LINE_COLOR_VARS[0]),
+    useThemeColor(LINE_COLOR_VARS[1]),
+    useThemeColor(LINE_COLOR_VARS[2]),
+    useThemeColor(LINE_COLOR_VARS[3]),
+  ]
+
   if (nodeIds.length === 0) return null
 
   const data = result.ticks.slice(0, tickIndex + 1).map((t) => ({ tMs: t.tMs, ...byTick.get(t.tMs) }))
@@ -41,7 +53,7 @@ export function QueueDepthChart({ result, tickIndex }: { result: SimResult; tick
           key={nodeId}
           type="monotone"
           dataKey={nodeId}
-          stroke={LINE_COLORS[i % LINE_COLORS.length]}
+          stroke={lineColors[i % lineColors.length]}
           strokeWidth={1.5}
           dot={false}
           name={nodeId}

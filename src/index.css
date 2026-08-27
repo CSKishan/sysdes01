@@ -4,7 +4,14 @@
   --font-sans: "Space Grotesk", system-ui, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
 
-  /* Blueprint palette: schematic ink on a dark-slate drafting table */
+  /* Blueprint palette: schematic ink on a dark-slate drafting table (the
+     dark theme, and the default before JS sets a `data-theme` attribute --
+     see the light overrides below and the `theme` setting in
+     settingsStore.ts). Every one of these is a plain CSS custom property,
+     not a Tailwind-only construct, so `:root[data-theme="light"]`
+     redefining the same names below is enough to retheme every utility
+     class built from them (bg-ink-950, text-brand-400, etc.) with no
+     per-component changes. */
   --color-ink-950: #0a0e14;
   --color-ink-900: #10161f;
   --color-ink-800: #151b26;
@@ -24,6 +31,50 @@
   --color-bad-500: #f2685f;
 }
 
+/* Light theme: same ramp, same relative ordering (ink-950 is still the
+   page background, ink-100 is still primary text), just re-inked on
+   paper instead of slate -- a cream/white "blueprint reversed to print"
+   look rather than a generic light-mode palette. brand/ok/warn/bad get
+   darker, more saturated values than their dark-theme counterparts since
+   the originals were tuned for contrast against near-black, not
+   near-white. Applied via `document.documentElement.dataset.theme` (set
+   in App.tsx from settingsStore's `theme`); the attribute selector on
+   :root beats the plain :root above it by specificity regardless of
+   source order, so this doesn't need to follow the @theme block. */
+:root[data-theme="light"] {
+  --color-ink-950: #f7f4ec;
+  --color-ink-900: #efeadd;
+  --color-ink-800: #e6dfcd;
+  --color-ink-700: #d2c8b0;
+  --color-ink-600: #b3a586;
+  --color-ink-500: #7c705a;
+  --color-ink-400: #5c5140;
+  --color-ink-300: #443c2f;
+  --color-ink-200: #2c2720;
+  --color-ink-100: #191510;
+
+  --color-brand-500: #1868c9;
+  --color-brand-400: #2d5c94;
+
+  --color-ok-500: #1f8c56;
+  --color-warn-500: #96650a;
+  --color-bad-500: #c93830;
+
+  --grid-line-minor: rgba(24, 104, 201, 0.06);
+  --grid-line-major: rgba(24, 104, 201, 0.1);
+}
+
+/* Grid-line colors for the body background below -- plain CSS custom
+   properties (not @theme, so they don't need to be Tailwind utilities).
+   Dark-theme defaults live here; the light theme overrides them above
+   alongside its color ramp, since the same brand-blue tint at low alpha
+   that reads as a subtle schematic grid on near-black is nearly invisible
+   at those alpha values on cream paper. */
+:root {
+  --grid-line-minor: rgba(94, 184, 255, 0.055);
+  --grid-line-major: rgba(94, 184, 255, 0.1);
+}
+
 html,
 body,
 #root {
@@ -39,10 +90,10 @@ body {
   /* Hairline schematic grid: a fine 16px lattice with a brighter major
      line every 5th cell, like graph paper on a drafting table. */
   background-image:
-    linear-gradient(rgba(94, 184, 255, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(94, 184, 255, 0.055) 1px, transparent 1px),
-    linear-gradient(rgba(94, 184, 255, 0.1) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(94, 184, 255, 0.1) 1px, transparent 1px);
+    linear-gradient(var(--grid-line-minor) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line-minor) 1px, transparent 1px),
+    linear-gradient(var(--grid-line-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line-major) 1px, transparent 1px);
   background-size:
     16px 16px,
     16px 16px,

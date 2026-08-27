@@ -145,10 +145,20 @@ function AppRoutes() {
 
 function App() {
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
+  const theme = useSettingsStore((s) => s.theme)
 
   useEffect(() => {
     document.documentElement.dataset.reducedMotion = reducedMotion ? 'true' : 'false'
   }, [reducedMotion])
+
+  // The inline script in index.html already applies this attribute
+  // synchronously before first paint (avoiding a flash of the wrong
+  // theme on load for a returning light-mode user) -- this effect keeps
+  // it in sync with the store for every render after that, including
+  // toggling it live from Settings.
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
 
   return (
     <HashRouter>

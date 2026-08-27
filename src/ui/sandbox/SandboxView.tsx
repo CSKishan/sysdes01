@@ -12,6 +12,7 @@ import { constantTraffic } from '@/engine/traffic'
 import { useProgressStore } from '@/game/progressStore'
 import { CanvasEditor } from '@/ui/canvas/CanvasEditor'
 import { RunControls } from '@/ui/dashboard/RunControls'
+import { ALL_METRICS } from '@/ui/dashboard/MetricsPanel'
 import { SimulationDashboardSidebar } from '@/ui/dashboard/SimulationDashboardSidebar'
 import { useSimulationPlayback } from '@/ui/dashboard/useSimulationPlayback'
 import { Panel } from '@/ui/shared/Panel'
@@ -183,19 +184,7 @@ export function SandboxView({ onBack }: { onBack: () => void }) {
         <SimulationDashboardSidebar
           result={playback.result}
           tickIndex={playback.tickIndex}
-          visibleMetrics={[
-            'latency',
-            'throughput',
-            'errors',
-            'cost',
-            'cacheHitRate',
-            'availability',
-            'writeLatency',
-            'durability',
-            'replicationLag',
-            'shardImbalance',
-            'queueDepth',
-          ]}
+          visibleMetrics={ALL_METRICS}
           showQueueDepth
         />
       </div>

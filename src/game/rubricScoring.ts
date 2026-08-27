@@ -53,11 +53,25 @@ export function countNodeKind(graph: SimGraph, kind: string): number {
   return graph.nodes.filter((n) => n.config.kind === kind).length
 }
 
+// Every case study's rubric calls hasConnectedNodeKind/countConnectedNodeKind
+// several times per scoreRubric() pass (one per criterion), and each of
+// those used to rerun this same BFS over the same static graph from
+// scratch. Cached by graph object identity -- a WeakMap so a superseded
+// graph (the player edits it, producing a new object) isn't kept alive by
+// this cache once nothing else references it.
+const reachableNodeIdsCache = new WeakMap<SimGraph, Set<string>>()
+
 /** Every node reachable from a client node by following edges in their
  * request-flow direction (source -> target). The basis for the "connected"
  * rubric helpers below -- a node dropped on the canvas with no edges to it
- * is never in this set, regardless of its kind. */
+ * is never in this set, regardless of its kind.
+ *
+ * A near-duplicate of engine/metrics.ts's own reachableNodeIds -- see that
+ * one's doc comment for why they're separate and how they can drift (this
+ * one seeds from every client node, that one from just the first). */
 function reachableNodeIds(graph: SimGraph): Set<string> {
+  const cached = reachableNodeIdsCache.get(graph)
+  if (cached) return cached
   const clientIds = graph.nodes.filter((n) => n.config.kind === 'client').map((n) => n.id)
   const visited = new Set<string>(clientIds)
   const queue = [...clientIds]
@@ -70,6 +84,7 @@ function reachableNodeIds(graph: SimGraph): Set<string> {
       }
     }
   }
+  reachableNodeIdsCache.set(graph, visited)
   return visited
 }
 

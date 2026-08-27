@@ -3,7 +3,8 @@
 // import) and the one display preference the game has (reduced motion).
 
 import { useRef, useState } from 'react'
-import { Settings, ArrowLeft, Download, Upload, RotateCcw, Check } from 'lucide-react'
+import clsx from 'clsx'
+import { Settings, ArrowLeft, Download, Upload, RotateCcw, Check, Sun, Moon } from 'lucide-react'
 import type { ComponentKind } from '@/engine/types'
 import { COMPONENT_REGISTRY } from '@/engine/components'
 import { useProgressStore, initialState as progressInitialState, type LevelStars } from '@/game/progressStore'
@@ -67,6 +68,8 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   const quiz = useQuizStore()
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
   const setReducedMotion = useSettingsStore((s) => s.setReducedMotion)
+  const theme = useSettingsStore((s) => s.theme)
+  const setTheme = useSettingsStore((s) => s.setTheme)
 
   const [confirmingReset, setConfirmingReset] = useState(false)
   const [importMessage, setImportMessage] = useState<string | null>(null)
@@ -165,9 +168,38 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
       <div className="flex flex-col gap-4">
         <Panel className="p-5">
           <h2 className="mb-1 text-sm font-semibold text-ink-100">Display</h2>
-          <p className="mb-3 text-sm text-ink-400">
-            Turn off the looping diagram and dashboard animations.
-          </p>
+          <p className="mb-3 text-sm text-ink-400">Theme, and whether things move.</p>
+          <div className="mb-4 flex items-center justify-between">
+            <span className="text-sm text-ink-200">Theme</span>
+            <div className="inline-flex border border-ink-700" role="radiogroup" aria-label="Theme">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={theme === 'dark'}
+                onClick={() => setTheme('dark')}
+                className={clsx(
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors',
+                  theme === 'dark' ? 'bg-brand-500 text-ink-950' : 'text-ink-400 hover:text-ink-100',
+                )}
+              >
+                <Moon className="h-3.5 w-3.5" strokeWidth={1.8} />
+                Dark
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={theme === 'light'}
+                onClick={() => setTheme('light')}
+                className={clsx(
+                  'flex items-center gap-1.5 border-l border-ink-700 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors',
+                  theme === 'light' ? 'bg-brand-500 text-ink-950' : 'text-ink-400 hover:text-ink-100',
+                )}
+              >
+                <Sun className="h-3.5 w-3.5" strokeWidth={1.8} />
+                Light
+              </button>
+            </div>
+          </div>
           <label className="flex items-center gap-2 text-sm text-ink-200">
             <input
               type="checkbox"

@@ -488,6 +488,21 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
     nodeIdsByRegion.set(n.region, list)
   }
   const retryEdges = graph.edges.filter((e) => e.retry)
+  // Grouped by target once, up front: a target's errorRps is a single
+  // per-tick aggregate, not broken down by which edge sent the traffic, so
+  // when two retry-configured edges share a target only one can claim that
+  // tick's error (see the claim loop below). retryClaimRotation tracks,
+  // per target, which of that target's edges claims next -- without it,
+  // graph.edges' fixed order would let the same (first) edge win every
+  // single tick forever, permanently starving every other edge into that
+  // target of retries despite each having its own `retry` config.
+  const retryEdgesByTarget = new Map<string, GraphEdge[]>()
+  for (const edge of retryEdges) {
+    const list = retryEdgesByTarget.get(edge.target) ?? []
+    list.push(edge)
+    retryEdgesByTarget.set(edge.target, list)
+  }
+  const retryClaimRotation = new Map<string, number>()
 
   for (let tMs = 0; tMs < workload.durationMs; tMs += workload.tickMs) {
     const incidentsNow = activeIncidents(incidents, tMs)
@@ -1387,17 +1402,21 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
       // edge sent it -- if two retry-configured edges share a target,
       // reading and re-claiming that same number for each would double-
       // subtract from errorRpsThisTick and double-inject the retry. Only
-      // the first retry-configured edge to a given target claims its error
-      // this tick; a second edge to the same target waits for its own turn.
-      const claimedTargets = new Set<string>()
-      for (const edge of retryEdges) {
-        if (claimedTargets.has(edge.target)) continue
-        claimedTargets.add(edge.target)
-        const targetErrorRps = thisTickByNode.get(edge.target)?.errorRps ?? 0
+      // one retry-configured edge to a given target claims its error this
+      // tick; the rest wait -- but WHICH one claims rotates every tick
+      // (retryClaimRotation), so with multiple edges into the same target,
+      // each gets its own turn over time instead of graph.edges' fixed
+      // order letting the same edge claim it forever.
+      for (const [target, edgesForTarget] of retryEdgesByTarget) {
+        const targetErrorRps = thisTickByNode.get(target)?.errorRps ?? 0
         if (targetErrorRps <= EPS) {
-          retryStreakByEdge.set(edge.id, 0)
+          for (const edge of edgesForTarget) retryStreakByEdge.set(edge.id, 0)
           continue
         }
+        const startIdx = retryClaimRotation.get(target) ?? 0
+        const edge = edgesForTarget[startIdx % edgesForTarget.length]
+        retryClaimRotation.set(target, (startIdx + 1) % edgesForTarget.length)
+
         const streak = retryStreakByEdge.get(edge.id) ?? 0
         if (streak >= edge.retry!.maxAttempts) {
           // Exhausted: this chain of trouble is over, the error stands as
@@ -1411,6 +1430,15 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
         const pending = pendingRetriesByEdge.get(edge.id) ?? []
         pending.push({
           rps: targetErrorRps,
+          // KNOWN LIMITATION: hardcoded, not the opType(s) that actually
+          // errored -- the same per-node errorRps aggregate this claim
+          // reads from doesn't preserve a read/write breakdown either, so
+          // there's nothing here to attribute correctly from. A retried
+          // write is misrouted onto the read path (wrong capacity/latency
+          // pool, and excluded from writeP50Ms/writeP99Ms) until node-tick
+          // error accounting is split by opType -- a bigger change than
+          // this claim-rotation fix. No shipped level or case study
+          // combines `retry` with write traffic yet, so this is latent.
           opType: 'read',
           scheduledAtMs: tMs + edge.retry!.backoffMs,
           latencyMs: edge.retry!.backoffMs + (edge.crossRegionLatencyMs ?? 0),
@@ -1435,25 +1463,12 @@ export function runSimulation({ graph, workload, incidents = [] }: RunOptions): 
     })
   }
 
-  const costPerHour = graph.nodes.reduce((acc, n) => {
-    if (
-      n.config.kind === 'server' ||
-      n.config.kind === 'loadBalancer' ||
-      n.config.kind === 'cache' ||
-      n.config.kind === 'database' ||
-      n.config.kind === 'replica' ||
-      n.config.kind === 'shardRouter' ||
-      n.config.kind === 'queue' ||
-      n.config.kind === 'broker' ||
-      n.config.kind === 'apiGateway' ||
-      n.config.kind === 'service' ||
-      n.config.kind === 'rateLimiter' ||
-      n.config.kind === 'circuitBreaker'
-    ) {
-      return acc + n.config.costPerHour
-    }
-    return acc
-  }, 0)
+  // Every node kind except 'client' carries costPerHour (ClientConfig is
+  // the one config with no cost field) -- rather than an enumerated list of
+  // every other kind, which silently stops billing a future kind that
+  // forgets to be added to it, exclude the one kind that's actually
+  // special.
+  const costPerHour = graph.nodes.reduce((acc, n) => (n.config.kind !== 'client' ? acc + n.config.costPerHour : acc), 0)
 
   let bottleneckNodeId: string | null = null
   let bottleneckAvg = -1

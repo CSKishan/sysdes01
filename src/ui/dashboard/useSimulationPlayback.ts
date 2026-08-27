@@ -3,7 +3,7 @@
 // animate as if traffic were flowing live, instead of just slamming the
 // player with a final number.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { runSimulation, SimValidationException } from '@/engine/simulate'
 import type { IncidentWindow, SimGraph, SimResult, Workload } from '@/engine/types'
 import type { LiveMetricsMap } from '@/ui/canvas/NodeMetricsContext'
@@ -75,24 +75,37 @@ export function useSimulationPlayback() {
     setErrorMessage(null)
   }, [stop])
 
-  const liveMetrics: LiveMetricsMap = {}
-  if (result) {
-    const tick = result.ticks[Math.min(tickIndex, result.ticks.length - 1)]
-    if (tick) {
-      for (const nm of result.nodeTicks) {
-        if (nm.tMs === tick.tMs) {
-          liveMetrics[nm.nodeId] = {
-            utilization: nm.utilization,
-            errorRps: nm.errorRps,
-            cacheHitRate: nm.cacheHitRate,
-            inboundRps: nm.inboundRps,
-            queueDepth: nm.queueDepth,
-            circuitState: nm.circuitState,
-          }
-        }
+  // Indexed by tMs once per `result` (not per tick) -- rebuilding this by
+  // scanning the full nodeTicks array on every render, keyed only by the
+  // playback timer's tickIndex, meant every single tick advance during
+  // playback redid an O(nodeTicks) scan (and produced a brand-new object
+  // identity every time regardless), which forced every ComponentNode
+  // consuming this via NodeMetricsProvider to re-render each tick whether
+  // or not its own node's metrics actually changed.
+  const liveMetricsByTick = useMemo(() => {
+    const byTick = new Map<number, LiveMetricsMap>()
+    if (!result) return byTick
+    for (const nm of result.nodeTicks) {
+      const tickMetrics = byTick.get(nm.tMs) ?? {}
+      tickMetrics[nm.nodeId] = {
+        utilization: nm.utilization,
+        errorRps: nm.errorRps,
+        cacheHitRate: nm.cacheHitRate,
+        inboundRps: nm.inboundRps,
+        queueDepth: nm.queueDepth,
+        circuitState: nm.circuitState,
       }
+      byTick.set(nm.tMs, tickMetrics)
     }
-  }
+    return byTick
+  }, [result])
+
+  const liveMetrics: LiveMetricsMap = useMemo(() => {
+    if (!result) return {}
+    const tick = result.ticks[Math.min(tickIndex, result.ticks.length - 1)]
+    if (!tick) return {}
+    return liveMetricsByTick.get(tick.tMs) ?? {}
+  }, [result, tickIndex, liveMetricsByTick])
 
   return {
     status,

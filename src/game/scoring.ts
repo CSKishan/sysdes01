@@ -142,7 +142,13 @@ export function scoreRun(result: SimResult, slo: SloTarget): ScoreResult {
     })
   }
   if (slo.maxWriteP99Ms !== undefined) {
-    const ratio = result.aggregate.writeP99Ms / slo.maxWriteP99Ms
+    // Same zero-target guard as maxErrorRate/maxStaleReadRate/maxQueueDepth
+    // above: a plain division here would be 0/0 = NaN whenever a design
+    // with genuinely zero write latency meets a `maxWriteP99Ms: 0` target,
+    // and `NaN <= 1` is false -- silently failing a check the design
+    // actually satisfies exactly.
+    const ratio =
+      slo.maxWriteP99Ms > 0 ? result.aggregate.writeP99Ms / slo.maxWriteP99Ms : result.aggregate.writeP99Ms > 0 ? Infinity : 0
     checks.push({
       label: SLO_FIELD_FORMATS.maxWriteP99Ms.label,
       passed: ratio <= 1,
@@ -152,7 +158,15 @@ export function scoreRun(result: SimResult, slo: SloTarget): ScoreResult {
     })
   }
   if (slo.maxReplicationLagMs !== undefined) {
-    const ratio = result.aggregate.maxReplicationLagMs / slo.maxReplicationLagMs
+    // Same zero-target guard -- `maxReplicationLagMs: 0` ("no async lag
+    // allowed") is a natural SLO for an all-synchronous-replica design,
+    // which legitimately reports 0ms lag.
+    const ratio =
+      slo.maxReplicationLagMs > 0
+        ? result.aggregate.maxReplicationLagMs / slo.maxReplicationLagMs
+        : result.aggregate.maxReplicationLagMs > 0
+          ? Infinity
+          : 0
     checks.push({
       label: SLO_FIELD_FORMATS.maxReplicationLagMs.label,
       passed: ratio <= 1,

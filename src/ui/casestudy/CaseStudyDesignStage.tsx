@@ -12,6 +12,7 @@ import type { DesignStage as DesignStageContent } from '@/content/caseStudies/ty
 import { useProgressStore } from '@/game/progressStore'
 import { CanvasEditor } from '@/ui/canvas/CanvasEditor'
 import { RunControls } from '@/ui/dashboard/RunControls'
+import { ALL_METRICS } from '@/ui/dashboard/MetricsPanel'
 import { SimulationDashboardSidebar } from '@/ui/dashboard/SimulationDashboardSidebar'
 import { useSimulationPlayback } from '@/ui/dashboard/useSimulationPlayback'
 import { Panel } from '@/ui/shared/Panel'
@@ -42,6 +43,16 @@ export function CaseStudyDesignStage({
   const playback = useSimulationPlayback()
   const unlockedKinds = useProgressStore((s) => s.unlockedComponentKinds)
 
+  // Whether there's a result worth submitting: not just "not stale", but
+  // also "exists" -- this component remounts fresh every time the player
+  // comes back via "Back to design" (it's conditionally rendered on
+  // CaseStudyPlayer's `step`), which resets `playback.result` to null and
+  // `resultIsStale` to its initial `false` alike. Without this combined
+  // check, clicking "Review my design" again without re-running reads as
+  // "not stale" and silently resubmits null, downgrading a previously
+  // passing "clears the estimated load" result with no warning shown.
+  const hasFreshResult = playback.result !== null && !resultIsStale
+
   return (
     <div className="flex h-[calc(100vh-2rem)] flex-col gap-3 p-4">
       <Panel className="p-4">
@@ -59,15 +70,16 @@ export function CaseStudyDesignStage({
               }}
               onReset={playback.reset}
             />
-            <Button onClick={() => onReview(graph, resultIsStale ? null : playback.result)}>
+            <Button onClick={() => onReview(graph, hasFreshResult ? playback.result : null)}>
               Review my design
             </Button>
           </div>
         </div>
-        {resultIsStale && playback.result && (
+        {!hasFreshResult && (
           <p className="mt-2 border border-warn-500/40 bg-warn-500/10 px-3 py-2 text-sm text-warn-500">
-            You've changed the design since the last run — run it again before reviewing, or the
-            "clears the estimated load" check won't count.
+            {playback.result
+              ? 'You\'ve changed the design since the last run — run it again before reviewing, or the "clears the estimated load" check won\'t count.'
+              : 'Run your design before reviewing, or the "clears the estimated load" check won\'t count.'}
           </p>
         )}
         {playback.errorMessage && (
@@ -91,7 +103,12 @@ export function CaseStudyDesignStage({
           />
         </div>
 
-        <SimulationDashboardSidebar result={playback.result} tickIndex={playback.tickIndex} />
+        <SimulationDashboardSidebar
+          result={playback.result}
+          tickIndex={playback.tickIndex}
+          visibleMetrics={ALL_METRICS}
+          showQueueDepth
+        />
       </div>
     </div>
   )

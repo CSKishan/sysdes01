@@ -97,4 +97,27 @@ describe('scoreRun', () => {
     expect(scoreRun(hotShard, { maxShardImbalance: 1.5 }).passed).toBe(false)
     expect(scoreRun(evenShards, { maxShardImbalance: 1.5 }).passed).toBe(true)
   })
+
+  // A `maxX: 0` target is a natural way to author "none of this allowed at
+  // all" (no async replication lag, no write-latency budget beyond
+  // instant). A plain actual/target division is 0/0 = NaN whenever a run
+  // genuinely produces 0, and `NaN <= 1` is false -- silently failing a
+  // check the run actually satisfies exactly. maxErrorRate/maxStaleReadRate/
+  // maxQueueDepth already guard against this; maxWriteP99Ms and
+  // maxReplicationLagMs are the two fields that didn't.
+  describe('a `0` SLO target is satisfiable by an actual value of exactly 0, not scored as a NaN failure', () => {
+    it('maxWriteP99Ms', () => {
+      const instant = fakeResult({ writeP99Ms: 0 })
+      const slow = fakeResult({ writeP99Ms: 5 })
+      expect(scoreRun(instant, { maxWriteP99Ms: 0 }).passed).toBe(true)
+      expect(scoreRun(slow, { maxWriteP99Ms: 0 }).passed).toBe(false)
+    })
+
+    it('maxReplicationLagMs', () => {
+      const synchronous = fakeResult({ maxReplicationLagMs: 0 })
+      const lagging = fakeResult({ maxReplicationLagMs: 5 })
+      expect(scoreRun(synchronous, { maxReplicationLagMs: 0 }).passed).toBe(true)
+      expect(scoreRun(lagging, { maxReplicationLagMs: 0 }).passed).toBe(false)
+    })
+  })
 })

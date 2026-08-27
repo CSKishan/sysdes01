@@ -23,9 +23,16 @@ export function RichText({ text }: { text: string }) {
           )
         }
         if (part.startsWith('[[') && part.endsWith(']]')) {
-          const term = part.slice(2, -2)
+          // Wiki-style alias syntax: [[glossary term|display text]] links to
+          // the term but renders the text after the `|` -- e.g. a lesson
+          // wants "replica" in running prose to link to the "replication"
+          // entry. Plain [[term]] (no `|`) uses the term as both.
+          const inner = part.slice(2, -2)
+          const pipeIndex = inner.indexOf('|')
+          const term = pipeIndex === -1 ? inner : inner.slice(0, pipeIndex)
+          const display = pipeIndex === -1 ? inner : inner.slice(pipeIndex + 1)
           const entry = findGlossaryEntry(term)
-          if (!entry || !inRouter) return <Fragment key={i}>{term}</Fragment>
+          if (!entry || !inRouter) return <Fragment key={i}>{display}</Fragment>
           return (
             <Link
               key={i}
@@ -33,7 +40,7 @@ export function RichText({ text }: { text: string }) {
               title={entry.definition}
               className="text-brand-400 underline decoration-brand-500/40 underline-offset-2 hover:text-brand-300"
             >
-              {term}
+              {display}
             </Link>
           )
         }

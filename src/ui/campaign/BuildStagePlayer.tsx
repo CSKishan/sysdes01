@@ -1,19 +1,37 @@
 // Drives a single build stage (guided / solo / twist): optional decision
 // card, then canvas + run controls + live dashboard, then debrief.
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { BuildStage } from '@/content/types'
 import type { SimGraph } from '@/engine/types'
 import { CanvasEditor } from '@/ui/canvas/CanvasEditor'
 import { GuidedStepPanel } from '@/ui/guided/GuidedStepPanel'
 import { RunControls } from '@/ui/dashboard/RunControls'
 import { SimulationDashboardSidebar } from '@/ui/dashboard/SimulationDashboardSidebar'
+import { DEFAULT_METRICS, type MetricKey } from '@/ui/dashboard/MetricsPanel'
 import { useSimulationPlayback } from '@/ui/dashboard/useSimulationPlayback'
 import { DecisionCard } from '@/ui/debrief/DecisionCard'
 import { DebriefScreen } from '@/ui/debrief/DebriefScreen'
 import { scoreRun, type ScoreResult } from '@/game/scoring'
 import { Panel } from '@/ui/shared/Panel'
 import { RichParagraphs } from '@/ui/shared/RichText'
+
+// MetricsPanel's own base six plus, opt-in, whichever Chapter II+ tiles this
+// stage's SLO actually measures -- its own doc comment is explicit that
+// those four are "opt-in only... once they're actually relevant," not a
+// blanket addition to every dashboard. Without this, a stage whose SLO
+// includes e.g. maxWriteP99Ms never shows a "Write p50/p99" tile while the
+// player is iterating; they'd only discover the number existed after
+// running, on the debrief screen.
+function visibleMetricsFor(slo: BuildStage['slo']): MetricKey[] {
+  const metrics = [...DEFAULT_METRICS]
+  if (slo.maxWriteP99Ms !== undefined) metrics.push('writeLatency')
+  if (slo.minDurability !== undefined) metrics.push('durability')
+  if (slo.maxReplicationLagMs !== undefined) metrics.push('replicationLag')
+  if (slo.maxShardImbalance !== undefined) metrics.push('shardImbalance')
+  if (slo.maxQueueDepth !== undefined) metrics.push('queueDepth')
+  return metrics
+}
 
 export function BuildStagePlayer({
   stage,
@@ -37,6 +55,7 @@ export function BuildStagePlayer({
   const [decisionMade, setDecisionMade] = useState(!stage.decisionCard)
   const [graph, setGraph] = useState<SimGraph>(stage.startingGraph)
   const playback = useSimulationPlayback()
+  const visibleMetrics = useMemo(() => visibleMetricsFor(stage.slo), [stage.slo])
 
   if (!decisionMade && stage.decisionCard) {
     return (
@@ -110,7 +129,12 @@ export function BuildStagePlayer({
           />
         </div>
 
-        <SimulationDashboardSidebar result={playback.result} tickIndex={playback.tickIndex} />
+        <SimulationDashboardSidebar
+          result={playback.result}
+          tickIndex={playback.tickIndex}
+          visibleMetrics={visibleMetrics}
+          showQueueDepth={stage.slo.maxQueueDepth !== undefined}
+        />
       </div>
     </div>
   )

@@ -177,7 +177,16 @@ export function computeSystemAvailability(graph: SimGraph): number {
 /** Every node id reachable from the client by following edges forward.
  * Used so an unwired, decorative node (dropped on the canvas but never
  * connected to anything) can't count toward a topology-derived metric --
- * it was never part of the system a write would actually reach. */
+ * it was never part of the system a write would actually reach.
+ *
+ * A near-duplicate of this same BFS lives in game/rubricScoring.ts, kept
+ * separate rather than shared across the engine/game boundary -- but the
+ * two aren't quite identical: this one seeds from a single client node
+ * (`.find`), rubricScoring's seeds from every client node (`.filter`).
+ * They agree today because every graph has exactly one client, but this
+ * engine already has region tags and multi-region incidents; if a
+ * multi-client graph ever exists, update both or they'll silently
+ * disagree on which nodes are reachable. */
 function reachableNodeIds(graph: SimGraph): Set<string> {
   const clientNode = graph.nodes.find((n) => n.config.kind === 'client')
   if (!clientNode) return new Set()
