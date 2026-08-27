@@ -11,6 +11,15 @@ export interface QuizBankEntry extends QuizQuestion {
   chapterId: string
 }
 
+/** A QuizQuestion's own `id` (e.g. "q1") is only unique within the level
+ * that authored it -- nearly every level's first question is also "q1".
+ * Anything that needs a globally-unique key for one specific question
+ * (spaced-repetition scheduling, in particular) must use this instead of
+ * `entry.id` alone. */
+export function quizCardId(entry: QuizBankEntry): string {
+  return `${entry.levelId}:${entry.id}`
+}
+
 export function buildQuizBank(completedLevelIds: string[]): QuizBankEntry[] {
   const completed = new Set(completedLevelIds)
   return ALL_LEVELS.filter((l) => completed.has(l.id) && l.quizQuestions?.length).flatMap((l) =>

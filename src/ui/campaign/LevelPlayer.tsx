@@ -9,6 +9,7 @@ import type { ComponentKind } from '@/engine/types'
 import type { Level } from '@/content/types'
 import type { LevelStars } from '@/game/progressStore'
 import { useJournalStore } from '@/game/journalStore'
+import { useLeaderboardStore } from '@/game/leaderboardStore'
 import { SituationScreen } from '@/ui/teach/SituationScreen'
 import { TeachScreen } from '@/ui/teach/TeachScreen'
 import { BuildStagePlayer } from './BuildStagePlayer'
@@ -30,6 +31,12 @@ export function LevelPlayer({
   const [stageIndex, setStageIndex] = useState(0)
   const [pendingChoiceLabel, setPendingChoiceLabel] = useState<string | null>(null)
   const addJournalEntry = useJournalStore((s) => s.addEntry)
+  const recordChallengeAttempt = useLeaderboardStore((s) => s.recordAttempt)
+  // Owned here, not per build stage: a level can have several build stages
+  // (guided/solo/twist), each mounting its own BuildStagePlayer, but a
+  // Challenge-mode "how long did the whole level take" has to be measured
+  // from entering the level, not from whichever stage happens to be last.
+  const [challengeStartedAt] = useState(() => Date.now())
 
   const stages = challengeMode ? level.stages.filter((s) => s.kind === 'build') : level.stages
   const stage = stages[stageIndex]
@@ -83,6 +90,15 @@ export function LevelPlayer({
           key={stageIndex}
           stage={stage}
           hideGuidance={challengeMode}
+          onChallengeComplete={({ costPerHour }) => {
+            // Only the level's final build stage counts as "the challenge
+            // is done" -- an earlier stage passing (e.g. the guided
+            // sub-task of a multi-stage level) isn't the whole level yet,
+            // and recording it here too would conflate that stage's own
+            // time/cost with the real, full-level attempt.
+            if (!isLastStage) return
+            recordChallengeAttempt(level.id, Date.now() - challengeStartedAt, costPerHour)
+          }}
           onDecisionMade={(label) => setPendingChoiceLabel(label)}
           onDecisionRunComplete={(score) => {
             // Fires after every run that followed a decision-card choice --

@@ -20,6 +20,13 @@ import { SearchPalette } from '@/ui/library/SearchPalette'
 import { getCaseStudy } from '@/content/caseStudies/registry'
 import { CaseStudyMenu, INTERVIEWS_LEVEL_ID } from '@/ui/casestudy/CaseStudyMenu'
 import { CaseStudyPlayer } from '@/ui/casestudy/CaseStudyPlayer'
+import { ReviewHome } from '@/ui/review/ReviewHome'
+import { FlashcardsView } from '@/ui/review/FlashcardsView'
+import { SpacedQuizView } from '@/ui/review/SpacedQuizView'
+import { InterviewPhrasesView } from '@/ui/review/InterviewPhrasesView'
+import { ProgressDashboard } from '@/ui/progress/ProgressDashboard'
+import { AchievementToast } from '@/ui/progress/AchievementToast'
+import { useStreakStore } from '@/game/streakStore'
 
 function ChapterMapRoute() {
   const navigate = useNavigate()
@@ -138,6 +145,11 @@ function AppRoutes() {
       <Route path="/library/cheatsheet/:chapterId" element={<CheatSheetPage />} />
       <Route path="/case-studies" element={<CaseStudyMenuRoute />} />
       <Route path="/case-studies/:caseStudyId" element={<CaseStudyRoute />} />
+      <Route path="/review" element={<ReviewHome onBack={() => navigate('/')} />} />
+      <Route path="/review/flashcards" element={<FlashcardsView onBack={() => navigate('/review')} />} />
+      <Route path="/review/quiz" element={<SpacedQuizView onBack={() => navigate('/review')} />} />
+      <Route path="/review/interview-phrases" element={<InterviewPhrasesView onBack={() => navigate('/review')} />} />
+      <Route path="/progress" element={<ProgressDashboard onBack={() => navigate('/')} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
@@ -146,6 +158,7 @@ function AppRoutes() {
 function App() {
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
   const theme = useSettingsStore((s) => s.theme)
+  const recordVisitToday = useStreakStore((s) => s.recordVisitToday)
 
   useEffect(() => {
     document.documentElement.dataset.reducedMotion = reducedMotion ? 'true' : 'false'
@@ -160,9 +173,18 @@ function App() {
     document.documentElement.dataset.theme = theme
   }, [theme])
 
+  // "Opened the app today" is the simplest honest streak signal this
+  // app can measure without a backend -- see streakStore.ts. Once per
+  // mount is enough; recordVisitToday itself no-ops on a second call the
+  // same calendar day.
+  useEffect(() => {
+    recordVisitToday()
+  }, [recordVisitToday])
+
   return (
     <HashRouter>
       <SearchPalette />
+      <AchievementToast />
       <AppRoutes />
     </HashRouter>
   )

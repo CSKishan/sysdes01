@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { runSimulation, SimValidationException } from '@/engine/simulate'
 import type { IncidentWindow, SimGraph, SimResult, Workload } from '@/engine/types'
 import type { LiveMetricsMap } from '@/ui/canvas/NodeMetricsContext'
+import { useAchievementsStore } from '@/game/achievementsStore'
 
 export type PlaybackStatus = 'idle' | 'running' | 'done' | 'error'
 
@@ -50,6 +51,23 @@ export function useSimulationPlayback() {
       }
 
       setResult(simResult)
+      // The one choke point every completed simulation run passes through
+      // regardless of screen (guided level, Sandbox, case-study design) --
+      // checking achievements here means each screen doesn't need its own
+      // copy of this call. getState() rather than the hook, since this
+      // callback shouldn't re-subscribe (and re-render every dashboard
+      // consumer) on achievement-store changes it doesn't otherwise care
+      // about. Wrapped in its own try/catch, same as runSimulation() above:
+      // this is bookkeeping on top of an already-valid result, not part of
+      // whether the run itself succeeded -- a failure here (e.g. a
+      // persisted-store write hitting a full localStorage quota) shouldn't
+      // leave `status` stuck at its pre-run value with a result the UI
+      // never announces as ready.
+      try {
+        useAchievementsStore.getState().checkAfterRun({ graph, result: simResult, incidents })
+      } catch {
+        // Achievement tracking is a nice-to-have; swallow and continue.
+      }
       const tickCount = Math.max(simResult.ticks.length, 1)
       const interval = Math.max(MIN_TICK_INTERVAL_MS, Math.min(200, MAX_TOTAL_PLAYBACK_MS / tickCount))
 
