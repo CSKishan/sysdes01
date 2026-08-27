@@ -17,6 +17,9 @@ import { GlossaryPage } from '@/ui/library/GlossaryPage'
 import { NumbersPage } from '@/ui/library/NumbersPage'
 import { CheatSheetPage } from '@/ui/library/CheatSheetPage'
 import { SearchPalette } from '@/ui/library/SearchPalette'
+import { getCaseStudy } from '@/content/caseStudies/registry'
+import { CaseStudyMenu, INTERVIEWS_LEVEL_ID } from '@/ui/casestudy/CaseStudyMenu'
+import { CaseStudyPlayer } from '@/ui/casestudy/CaseStudyPlayer'
 
 function ChapterMapRoute() {
   const navigate = useNavigate()
@@ -74,6 +77,50 @@ function LevelRoute() {
   )
 }
 
+function CaseStudyMenuRoute() {
+  const navigate = useNavigate()
+  return (
+    <CaseStudyMenu
+      onOpenCaseStudy={(caseStudyId) => navigate(`/case-studies/${caseStudyId}`)}
+      onPlayLevel={(levelId) => navigate(`/level/${levelId}`)}
+      onBack={() => navigate('/')}
+    />
+  )
+}
+
+function CaseStudyRoute() {
+  const { caseStudyId } = useParams<{ caseStudyId: string }>()
+  const navigate = useNavigate()
+  const completedLevelIds = useProgressStore((s) => s.completedLevelIds)
+  const caseStudy = caseStudyId ? getCaseStudy(caseStudyId) : undefined
+
+  if (!caseStudy) {
+    return (
+      <div className="p-8 text-ink-200">
+        Couldn't find that case study.{' '}
+        <Button variant="secondary" className="ml-2" onClick={() => navigate('/case-studies')}>
+          Back to case studies
+        </Button>
+      </div>
+    )
+  }
+
+  // Same reasoning as LevelRoute's isLevelUnlocked re-check: a direct link
+  // bypasses CaseStudyMenu's disabled-button gate entirely. Case studies
+  // need every unlocked component kind to be meaningfully designable, so
+  // gate on having finished the campaign's own "start here" framework level.
+  if (!completedLevelIds.includes(INTERVIEWS_LEVEL_ID)) {
+    return <Navigate to="/case-studies" replace />
+  }
+
+  // key={caseStudy.id} forces a full remount when navigating directly
+  // between two different case studies (same route pattern, so React
+  // Router reuses the component instance and only updates the param) --
+  // without it, CaseStudyPlayer's local stage/timer/transcript state would
+  // leak from whichever case study was open before.
+  return <CaseStudyPlayer key={caseStudy.id} caseStudy={caseStudy} onExit={() => navigate('/case-studies')} />
+}
+
 function AppRoutes() {
   const navigate = useNavigate()
   return (
@@ -89,6 +136,8 @@ function AppRoutes() {
       <Route path="/library/glossary" element={<GlossaryPage />} />
       <Route path="/library/numbers" element={<NumbersPage />} />
       <Route path="/library/cheatsheet/:chapterId" element={<CheatSheetPage />} />
+      <Route path="/case-studies" element={<CaseStudyMenuRoute />} />
+      <Route path="/case-studies/:caseStudyId" element={<CaseStudyRoute />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

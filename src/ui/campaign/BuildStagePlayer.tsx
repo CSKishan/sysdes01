@@ -7,8 +7,7 @@ import type { SimGraph } from '@/engine/types'
 import { CanvasEditor } from '@/ui/canvas/CanvasEditor'
 import { GuidedStepPanel } from '@/ui/guided/GuidedStepPanel'
 import { RunControls } from '@/ui/dashboard/RunControls'
-import { MetricsPanel } from '@/ui/dashboard/MetricsPanel'
-import { LatencyChart } from '@/ui/dashboard/LatencyChart'
+import { SimulationDashboardSidebar } from '@/ui/dashboard/SimulationDashboardSidebar'
 import { useSimulationPlayback } from '@/ui/dashboard/useSimulationPlayback'
 import { DecisionCard } from '@/ui/debrief/DecisionCard'
 import { DebriefScreen } from '@/ui/debrief/DebriefScreen'
@@ -111,22 +110,7 @@ export function BuildStagePlayer({
           />
         </div>
 
-        <div className="flex w-64 shrink-0 flex-col gap-3">
-          <Panel className="p-3">
-            <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-widest text-ink-400">
-              Dashboard
-            </p>
-            <MetricsPanel result={playback.result} tickIndex={playback.tickIndex} />
-          </Panel>
-          {playback.result && (
-            <Panel className="p-3">
-              <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-widest text-ink-400">
-                Latency over time
-              </p>
-              <LatencyChart result={playback.result} tickIndex={playback.tickIndex} />
-            </Panel>
-          )}
-        </div>
+        <SimulationDashboardSidebar result={playback.result} tickIndex={playback.tickIndex} />
       </div>
     </div>
   )
