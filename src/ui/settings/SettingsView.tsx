@@ -17,8 +17,10 @@ import { useSpacedRepetitionStore, type CardState } from '@/game/spacedRepetitio
 import { useLeaderboardStore, type ChallengeRecord } from '@/game/leaderboardStore'
 import { useAchievementsStore } from '@/game/achievementsStore'
 import { useStreakStore } from '@/game/streakStore'
+import { useSandboxDesignsStore, isValidSimGraph, type SavedDesign } from '@/game/sandboxDesignsStore'
 import { Panel } from '@/ui/shared/Panel'
 import { Button } from '@/ui/shared/Button'
+import { downloadJson } from '@/ui/shared/downloadJson'
 
 const EXPORT_FORMAT_VERSION = 1
 
@@ -130,6 +132,27 @@ function sanitizeAchievementIds(value: unknown): string[] {
   return value.filter((id): id is string => typeof id === 'string' && known.has(id))
 }
 
+/** Same corrupted-import guard, for saved Sandbox designs -- reuses
+ * isValidSimGraph (shared with SandboxView's own JSON-import check) so the
+ * two paths a design can enter the app through validate to the same
+ * depth, and drops any entry whose `id` collides with one already kept
+ * (an imported backup with duplicate ids would otherwise produce
+ * duplicate React keys in Sandbox's design list, and make deleting one of
+ * them delete both). */
+function sanitizeSandboxDesigns(value: unknown): SavedDesign[] {
+  if (!Array.isArray(value)) return []
+  const seenIds = new Set<string>()
+  return value.filter((d): d is SavedDesign => {
+    if (!d || typeof d !== 'object') return false
+    const design = d as Record<string, unknown>
+    if (typeof design.id !== 'string' || seenIds.has(design.id)) return false
+    if (typeof design.name !== 'string' || !isFiniteNumber(design.savedAt)) return false
+    if (!isValidSimGraph(design.graph)) return false
+    seenIds.add(design.id)
+    return true
+  })
+}
+
 export function SettingsView({ onBack }: { onBack: () => void }) {
   const progress = useProgressStore()
   const caseStudyProgress = useCaseStudyProgressStore()
@@ -139,6 +162,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   const leaderboard = useLeaderboardStore()
   const achievements = useAchievementsStore()
   const streak = useStreakStore()
+  const sandboxDesigns = useSandboxDesignsStore((s) => s.designs)
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
   const setReducedMotion = useSettingsStore((s) => s.setReducedMotion)
   const theme = useSettingsStore((s) => s.theme)
@@ -176,14 +200,9 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
         longestStreakDays: streak.longestStreakDays,
         lastVisitAt: streak.lastVisitAt,
       },
+      sandboxDesigns: { designs: sandboxDesigns },
     }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `packet-and-post-progress-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadJson(`packet-and-post-progress-${new Date().toISOString().slice(0, 10)}.json`, payload)
   }
 
   function handleImportClick() {
@@ -250,6 +269,9 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
           lastVisitAt: isFiniteNumber(data.streak.lastVisitAt) ? data.streak.lastVisitAt : null,
         })
       }
+      if (data.sandboxDesigns && typeof data.sandboxDesigns === 'object') {
+        useSandboxDesignsStore.setState({ designs: sanitizeSandboxDesigns(data.sandboxDesigns.designs) })
+      }
       setImportMessage('Imported successfully.')
     } catch {
       setImportMessage("Couldn't read that file — make sure it's a Packet & Post export.")
@@ -257,6 +279,12 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   }
 
   function handleReset() {
+    // Deliberately does NOT clear sandboxDesignsStore: saved Sandbox
+    // designs are the player's own authored content, not progress --
+    // "reset progress" shouldn't silently delete something they built and
+    // explicitly chose to name and save, the same way it wouldn't delete
+    // an exported file sitting on their disk. (Still included in
+    // export/import above, since it's still worth backing up.)
     progress.resetProgress()
     caseStudyProgress.resetCaseStudyProgress()
     journal.clear()
@@ -366,7 +394,8 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
           <p className="mb-3 text-sm text-ink-400">
             Clears all completed levels, stars, unlocked components, case study progress, your
             decision journal, quiz history, review schedule, Challenge-mode records, achievements,
-            and streak. This can't be undone unless you've exported a backup above.
+            and streak -- but not your saved Sandbox designs, which aren't progress. This can't be
+            undone unless you've exported a backup above.
           </p>
           {!confirmingReset ? (
             <Button variant="secondary" onClick={() => setConfirmingReset(true)}>

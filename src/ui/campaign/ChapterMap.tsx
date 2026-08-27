@@ -25,9 +25,9 @@ export function ChapterMap({
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <header className="mb-8 flex items-center justify-between">
+      <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <Package className="h-6 w-6 text-brand-500" strokeWidth={1.6} />
+          <Package className="h-6 w-6 shrink-0 text-brand-500" strokeWidth={1.6} />
           <div>
             <h1 className="text-2xl font-semibold text-ink-100">Packet and Post</h1>
             <p className="mt-1 font-mono text-xs uppercase tracking-wide text-ink-400">
@@ -35,7 +35,7 @@ export function ChapterMap({
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Link
             to="/library"
             className="inline-flex items-center gap-2 border border-ink-700 bg-ink-800 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink-200 hover:border-brand-500/50 hover:text-ink-100"
@@ -117,7 +117,7 @@ export function ChapterMap({
                       data-unlocked={unlocked}
                       data-completed={completed}
                       className={clsx(
-                        'flex items-center justify-between border px-4 py-3',
+                        'flex flex-col gap-2 border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4',
                         unlocked ? 'border-ink-700 bg-ink-900/60' : 'border-ink-800 bg-ink-950/40 opacity-50',
                       )}
                     >
