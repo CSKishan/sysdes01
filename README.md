@@ -13,36 +13,47 @@ verbatim passage from the source README that covers what just happened.
 
 ## Status
 
-Chapter 0 (6 levels), Chapter I (15 levels, from IP addressing through
-caching, CDN, availability, and scalability), and Chapter II (15 levels,
-from the database primitive through replication, indexes, ACID/BASE, CAP,
-PACELC, transactions, sharding, consistent hashing, and federation) are
-complete: situation → teach → guided build → solo build → twist, the
-canvas, live dashboard, decision journal, quiz mode with a question bank
-covering every level, and a free-build sandbox. Routing is real
-(`/level/:id`, `/journal`, `/sandbox`, `/quiz`, `/settings`, `/library/*`)
-so any screen is linkable, and progress/journal/quiz data can be exported
-and re-imported from Settings.
+The full curriculum is built: Chapter 0 (6 levels) through Chapter IV (10
+levels) — 58 levels in total across networking, caching, databases,
+messaging/architecture, and operations/security — plus Chapter V's Case
+Study mode (5 open-ended designs: URL Shortener, WhatsApp, Twitter,
+Netflix, Uber, each with requirements gathering, a back-of-the-envelope
+estimation calculator, an open canvas, and a rubric-based review instead of
+a binary pass/fail). Every level follows situation → teach → guided build
+→ solo build → twist, scored against the same real simulation engine
+throughout.
 
-The engine models both reads and writes through seven primitives (client,
-server, load balancer, cache, database, replica, shard router), with
-consistent hashing, replication lag/staleness, write durability, and
-shard-imbalance all live-simulated rather than scripted. The Sandbox has a
-chaos toggle (traffic spike, node outage, network partition) for poking at
-failure scenarios outside of an authored level.
+The engine models both reads and writes through thirteen primitives
+(client, server, load balancer, cache, database, replica, shard router,
+queue, broker, API gateway, service, rate limiter, circuit breaker), with
+consistent hashing, replication lag/staleness, write durability, shard
+imbalance, retries/backoff, and multi-region failover all live-simulated
+rather than scripted. Sandbox has a chaos toggle (traffic spike, node
+outage, network partition) for poking at failure scenarios outside of an
+authored level, plus named save/load, JSON export/import, and PNG export of
+a design.
 
-**`/library`** is a second, ungated way into all 36 levels' content —
-browse or full-text search (Ctrl/Cmd-K) every topic, an inline-linked
-glossary, a "numbers every engineer should know" reference, and
-print-friendly per-chapter cheat sheets — without needing to play through
-the campaign first.
+Beyond the campaign: a decision journal, quiz mode with a question bank
+covering every level, an SM-2 spaced-repetition review flow (the same
+question bank rescheduled by what you're actually about to forget, plus
+glossary flashcards and an interview-phrase practice deck), a progress
+dashboard (coverage heatmap, weak-area detection, streaks), a Challenge-mode
+leaderboard, and achievements tied to real simulation results. Routing is
+real (every screen is a linkable, bookmarkable URL under `/level/:id`,
+`/sandbox`, `/review/*`, `/progress`, `/library/*`, etc.), and progress data
+can be exported and re-imported from Settings.
 
-**Chapters III–V of the source curriculum are not yet built** — messaging
-and service architecture (Chapter III), resilience and security
-(Chapter IV), and the system design case studies (Chapter V). Chapter III
-onward needs async primitives (queue, broker, API gateway, service) and a
-sequence-diagram teaching primitive the engine and UI don't have yet. That
-work is scoped but not started.
+**`/library`** is a second, ungated way into every level's content — browse
+or full-text search (Ctrl/Cmd-K) every topic, an inline-linked glossary, a
+"numbers every engineer should know" reference, print-friendly per-chapter
+cheat sheets, and an attribution page — without needing to play through the
+campaign first.
+
+**Read `/library/attribution` (or `AttributionPage.tsx`) before publishing
+or sharing this project further.** The source curriculum this project is
+built on is licensed CC BY-NC-ND 4.0, which does not permit distributing
+derivative works — whether this project counts as one, and whether its own
+distribution counts as non-commercial, hasn't been resolved.
 
 ## Running locally
 
@@ -79,7 +90,8 @@ src/
                # plus the glossary, numbers reference, and search index
                # that power /library
   game/        # zustand stores (progress, decision journal, quiz history,
-               # display settings) + scoring
+               # spaced repetition, leaderboard, achievements, streak,
+               # sandbox designs, display settings) + scoring + rubrics
   ui/
     teach/     # lesson player + comprehension checks
     guided/    # step-by-step build narration
@@ -87,10 +99,14 @@ src/
     dashboard/ # live metrics, latency chart, simulation playback
     debrief/   # decision cards, scorecard + README-quote debrief
     campaign/  # level player, chapter map
-    sandbox/   # free build, no objectives, chaos toggle
+    casestudy/ # requirements/estimation/design/rubric flow, Chapter V
+    sandbox/   # free build, chaos toggle, save/load, JSON/PNG export
     journal/   # the player's own accumulated decision log
-    settings/  # reset/export/import progress, reduced-motion toggle
-    library/   # ungated topic/glossary/numbers/cheat-sheet pages + search
+    review/    # spaced-repetition quiz + flashcards + interview phrases
+    progress/  # coverage dashboard, achievements, streak, toast
+    settings/  # reset/export/import progress, theme, reduced-motion
+    library/   # ungated topic/glossary/numbers/cheat-sheet/attribution
+               # pages + search
 ```
 
 The engine is the one part of this app that has to be right: every number

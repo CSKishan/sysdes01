@@ -7,6 +7,7 @@ const TABS = [
   { href: '/library', label: 'Topics', exact: true },
   { href: '/library/glossary', label: 'Glossary', exact: false },
   { href: '/library/numbers', label: 'Numbers', exact: false },
+  { href: '/library/attribution', label: 'Attribution', exact: false },
 ]
 
 /** Shared chrome for every /library/* page: the ungated door the plan

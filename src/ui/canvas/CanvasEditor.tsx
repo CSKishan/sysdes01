@@ -5,7 +5,7 @@
 // component a fresh `key` from the parent whenever the level stage changes
 // so it re-seeds from the new starting graph instead of trying to diff.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -20,6 +20,7 @@ import {
   type OnEdgesChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { toPng } from 'html-to-image'
 import type { ComponentKind, SimGraph } from '@/engine/types'
 import { createDefaultNodeConfig } from '@/engine/components'
 import { NODE_TYPES } from './ComponentNode'
@@ -41,13 +42,21 @@ interface CanvasEditorProps {
   lockedNodeIds?: string[]
 }
 
-export function CanvasEditor(props: CanvasEditorProps) {
+/** Imperative handle a parent can use to export a PNG snapshot of the
+ * canvas as it currently looks -- not something derivable from props, so a
+ * ref is the right tool here rather than plumbing an export callback
+ * through render. */
+export interface CanvasEditorHandle {
+  exportPng: () => Promise<string>
+}
+
+export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(function CanvasEditor(props, ref) {
   return (
     <ReactFlowProvider>
-      <CanvasEditorInner {...props} />
+      <CanvasEditorInner {...props} handleRef={ref} />
     </ReactFlowProvider>
   )
-}
+})
 
 function CanvasEditorInner({
   graph,
@@ -57,7 +66,8 @@ function CanvasEditorInner({
   showPalette = true,
   hint,
   lockedNodeIds = [],
-}: CanvasEditorProps) {
+  handleRef,
+}: CanvasEditorProps & { handleRef: React.ForwardedRef<CanvasEditorHandle> }) {
   const initial = fromSimGraph(graph)
   for (const node of initial.nodes) {
     if (lockedNodeIds.includes(node.id)) node.data.locked = true
@@ -72,6 +82,41 @@ function CanvasEditorInner({
   // literal SVG/CSS attributes, not Tailwind classes, so they need the
   // theme wired in directly instead of picking it up from the cascade.
   const backgroundDotColor = useThemeColor('--color-ink-700')
+
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      exportPng: () => {
+        if (!wrapperRef.current) return Promise.reject(new Error('Canvas not ready'))
+        return toPng(wrapperRef.current, {
+          // Same background the page already paints behind the canvas --
+          // without an explicit backgroundColor, html-to-image renders
+          // transparent, and Controls/Background dots meant to sit on a
+          // dark canvas end up nearly invisible against most image
+          // viewers' default white.
+          backgroundColor: getComputedStyle(wrapperRef.current).backgroundColor,
+          // The page's fonts (Space Grotesk, IBM Plex Mono) load from
+          // Google Fonts' CDN -- html-to-image tries to read that
+          // stylesheet's rules to embed the fonts in the exported image,
+          // which the browser blocks as cross-origin and logs a
+          // SecurityError for on every export. Skipping font embedding
+          // avoids that noise entirely; the exported PNG falls back to a
+          // system font instead, a fine trade for a canvas snapshot that's
+          // mostly node boxes, not typography.
+          skipFonts: true,
+          // html-to-image defaults to window.devicePixelRatio, which
+          // rasterizes at 4-9x the pixel area on a typical high-DPI
+          // display (Retina, or Windows at 150-200% scaling) -- real cost
+          // for a diagram export whose content is flat-colored node
+          // boxes, not something that benefits from supersampling. Capped
+          // rather than pinned to 1 so it still looks crisp on a standard
+          // display.
+          pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+        })
+      },
+    }),
+    [],
+  )
 
   // Report graph changes to the parent from an effect, not from inside a
   // setState updater -- calling another component's setState synchronously
@@ -95,12 +140,21 @@ function CanvasEditorInner({
     setEdges((prev) => addEdge({ ...connection, id: nextEdgeId(connection.source, connection.target) }, prev))
   }, [])
 
-  const onDrop = useCallback(
-    (event: React.DragEvent) => {
-      event.preventDefault()
-      const kind = event.dataTransfer.getData(PALETTE_DRAG_MIME) as ComponentKind
-      if (!kind) return
-      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+  // The keyboard-accessible counterpart to onConnect above -- dragging
+  // between two handles was the only way to wire nodes together, which a
+  // keyboard-only or screen-reader user has no way to do. NodeInspector's
+  // "Connect to" control calls this directly instead of going through
+  // React Flow's own pointer-driven connection gesture.
+  const connectNodes = useCallback((sourceId: string, targetId: string) => {
+    setEdges((prev) => addEdge({ source: sourceId, target: targetId, id: nextEdgeId(sourceId, targetId) }, prev))
+  }, [])
+
+  // Shared by both placement paths below (drag-drop and the Palette's
+  // keyboard-activatable add button) -- only how the screen point is
+  // decided differs between them.
+  const insertNode = useCallback(
+    (kind: ComponentKind, screenPoint: { x: number; y: number }) => {
+      const position = screenToFlowPosition(screenPoint)
       const id = nextNodeId(kind)
       const newNode: FlowNode = {
         id,
@@ -113,11 +167,39 @@ function CanvasEditorInner({
     [screenToFlowPosition],
   )
 
+  const onDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault()
+      const kind = event.dataTransfer.getData(PALETTE_DRAG_MIME) as ComponentKind
+      if (!kind) return
+      insertNode(kind, { x: event.clientX, y: event.clientY })
+    },
+    [insertNode],
+  )
+
+  // The keyboard/click path for adding a component -- drag-and-drop alone
+  // makes the canvas entirely unusable without a mouse, since there was no
+  // other way to place a node at all. Drops it near the canvas center,
+  // staggered a little per existing node count so successive additions
+  // don't land exactly on top of each other and need to be dragged apart
+  // just to see them.
+  const addComponent = useCallback(
+    (kind: ComponentKind) => {
+      const rect = wrapperRef.current?.getBoundingClientRect()
+      const stagger = (nodes.length % 6) * 28
+      const screenPoint = rect
+        ? { x: rect.left + rect.width / 2 + stagger, y: rect.top + rect.height / 2 + stagger }
+        : { x: 200 + stagger, y: 200 + stagger }
+      insertNode(kind, screenPoint)
+    },
+    [insertNode, nodes.length],
+  )
+
   const selectedNode = nodes.find((n) => n.id === selectedNodeId)
 
   return (
     <div className="flex h-full gap-3">
-      {showPalette && <Palette unlockedKinds={unlockedKinds} />}
+      {showPalette && <Palette unlockedKinds={unlockedKinds} onAddComponent={addComponent} />}
 
       <div
         ref={wrapperRef}
@@ -169,6 +251,8 @@ function CanvasEditorInner({
             setSelectedNodeId(null)
           }}
           onClose={() => setSelectedNodeId(null)}
+          otherNodes={nodes.filter((n) => n.id !== selectedNode.id).map((n) => ({ id: n.id, label: n.data.label }))}
+          onConnectTo={(targetId) => connectNodes(selectedNode.id, targetId)}
         />
       )}
     </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { availableChapterOptions, buildQuizBank, shuffle } from '../quizBank'
+import { availableChapterOptions, buildQuizBank, quizCardId, shuffle } from '../quizBank'
 import { ALL_LEVELS } from '../registry'
 
 describe('buildQuizBank', () => {
@@ -29,6 +29,30 @@ describe('buildQuizBank', () => {
       const correctCount = q.options.filter((o) => o.correct).length
       expect(correctCount).toBe(1)
     }
+  })
+})
+
+describe('quizCardId', () => {
+  it('is globally unique across the whole question bank, unlike the raw QuizQuestion id alone', () => {
+    // Every level's own quizQuestions reuse the same local ids (q1, q2, ...)
+    // -- quizCardId exists specifically because bare `entry.id` collides
+    // across levels and can't be used as a spaced-repetition card key.
+    const allIds = ALL_LEVELS.map((l) => l.id)
+    const bank = buildQuizBank(allIds)
+    const rawIds = new Set(bank.map((q) => q.id))
+    expect(rawIds.size, 'expected raw ids to actually collide across levels (sanity check)').toBeLessThan(bank.length)
+
+    const cardIds = bank.map((q) => quizCardId(q))
+    expect(new Set(cardIds).size).toBe(bank.length)
+  })
+
+  it('two different levels sharing a raw question id get different card ids', () => {
+    const allIds = ALL_LEVELS.map((l) => l.id)
+    const bank = buildQuizBank(allIds)
+    const q1s = bank.filter((q) => q.id === 'q1')
+    expect(q1s.length).toBeGreaterThan(1) // sanity check the collision exists at all
+    const [a, b] = q1s
+    expect(quizCardId(a)).not.toBe(quizCardId(b))
   })
 })
 

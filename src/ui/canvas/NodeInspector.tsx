@@ -1,4 +1,5 @@
-import { X } from 'lucide-react'
+import { useState } from 'react'
+import { X, Cable } from 'lucide-react'
 import type {
   ApiGatewayConfig,
   BrokerConfig,
@@ -26,6 +27,12 @@ interface NodeInspectorProps {
   onChange: (config: NodeConfig) => void
   onDelete: () => void
   onClose: () => void
+  /** Every other node on the canvas, for the keyboard-accessible "connect
+   * to" control below -- the only way to wire two nodes together used to
+   * be dragging between their handles, which a keyboard-only or
+   * screen-reader user has no way to do at all. */
+  otherNodes: { id: string; label: string }[]
+  onConnectTo: (targetNodeId: string) => void
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -48,8 +55,11 @@ export function NodeInspector({
   onChange,
   onDelete,
   onClose,
+  otherNodes,
+  onConnectTo,
 }: NodeInspectorProps) {
   const def = COMPONENT_REGISTRY[config.kind]
+  const [connectTargetId, setConnectTargetId] = useState('')
 
   return (
     <Panel className="w-64 shrink-0 p-4">
@@ -62,6 +72,36 @@ export function NodeInspector({
           <X className="h-4 w-4" strokeWidth={1.8} />
         </button>
       </div>
+
+      {otherNodes.length > 0 && (
+        <div className="mb-4 flex items-end gap-1.5 border-b border-ink-800 pb-4">
+          <Field label="Connect to">
+            <select
+              className={inputClass}
+              value={connectTargetId}
+              onChange={(e) => setConnectTargetId(e.target.value)}
+            >
+              <option value="">Choose a component…</option>
+              {otherNodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Button
+            variant="secondary"
+            disabled={!connectTargetId}
+            onClick={() => {
+              onConnectTo(connectTargetId)
+              setConnectTargetId('')
+            }}
+            aria-label={`Connect ${label} to the chosen component`}
+          >
+            <Cable className="h-3.5 w-3.5" strokeWidth={1.8} />
+          </Button>
+        </div>
+      )}
 
       <div className="flex flex-col gap-3">
         {config.kind === 'server' && (

@@ -1,7 +1,7 @@
 // Drives a single build stage (guided / solo / twist): optional decision
 // card, then canvas + run controls + live dashboard, then debrief.
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BuildStage } from '@/content/types'
 import type { SimGraph } from '@/engine/types'
 import { CanvasEditor } from '@/ui/canvas/CanvasEditor'
@@ -39,6 +39,7 @@ export function BuildStagePlayer({
   onDecisionMade,
   onDecisionRunComplete,
   hideGuidance = false,
+  onChallengeComplete,
 }: {
   stage: BuildStage
   /** Fires once, when the stage is actually finished (SLO passed). Advances the level. */
@@ -51,11 +52,36 @@ export function BuildStagePlayer({
   onDecisionRunComplete?: (score: ScoreResult) => void
   /** Challenge mode: build the design cold, no step-by-step narration. */
   hideGuidance?: boolean
+  /** Fires once, the first time a Challenge-mode run passes -- what the
+   * passing design cost. Only meaningful in challenge mode (hideGuidance).
+   * Deliberately doesn't report elapsed time itself: a level can have
+   * several build stages (guided/solo/twist), each getting its own
+   * BuildStagePlayer instance, so only the caller orchestrating the whole
+   * level (LevelPlayer) knows when the player actually started and which
+   * stage is the last one worth recording a leaderboard attempt for. */
+  onChallengeComplete?: (result: { costPerHour: number }) => void
 }) {
   const [decisionMade, setDecisionMade] = useState(!stage.decisionCard)
   const [graph, setGraph] = useState<SimGraph>(stage.startingGraph)
   const playback = useSimulationPlayback()
   const visibleMetrics = useMemo(() => visibleMetricsFor(stage.slo), [stage.slo])
+  // A ref, not state: this is bookkeeping for the effect below, not
+  // something the render output depends on, so there's no reason to pay
+  // for an extra re-render setting it would trigger. Read/written only
+  // inside the effect, never during render.
+  const challengeRecordedRef = useRef(false)
+
+  // Reports a Challenge-mode pass exactly once, from an effect rather than
+  // inline during render -- calling a prop callback directly in the render
+  // body is the kind of side effect React's render pass isn't supposed to
+  // have, even though it happens to work today.
+  useEffect(() => {
+    if (!hideGuidance || challengeRecordedRef.current || playback.status !== 'done' || !playback.result) return
+    const score = scoreRun(playback.result, stage.slo)
+    if (!score.passed) return
+    challengeRecordedRef.current = true
+    onChallengeComplete?.({ costPerHour: playback.result.aggregate.costPerHour })
+  }, [hideGuidance, playback.status, playback.result, stage.slo, onChallengeComplete])
 
   if (!decisionMade && stage.decisionCard) {
     return (

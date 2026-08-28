@@ -1,13 +1,11 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { HashRouter, Routes, Route, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { ComponentKind } from '@/engine/types'
 import { getLevel, isLevelUnlocked } from '@/content/registry'
 import { useProgressStore, type LevelStars } from '@/game/progressStore'
 import { useSettingsStore } from '@/game/settingsStore'
 import { ChapterMap } from '@/ui/campaign/ChapterMap'
-import { LevelPlayer } from '@/ui/campaign/LevelPlayer'
 import { JournalView } from '@/ui/journal/JournalView'
-import { SandboxView } from '@/ui/sandbox/SandboxView'
 import { QuizView } from '@/ui/quiz/QuizView'
 import { SettingsView } from '@/ui/settings/SettingsView'
 import { Button } from '@/ui/shared/Button'
@@ -16,10 +14,41 @@ import { TopicPage } from '@/ui/library/TopicPage'
 import { GlossaryPage } from '@/ui/library/GlossaryPage'
 import { NumbersPage } from '@/ui/library/NumbersPage'
 import { CheatSheetPage } from '@/ui/library/CheatSheetPage'
+import { AttributionPage } from '@/ui/library/AttributionPage'
 import { SearchPalette } from '@/ui/library/SearchPalette'
 import { getCaseStudy } from '@/content/caseStudies/registry'
 import { CaseStudyMenu, INTERVIEWS_LEVEL_ID } from '@/ui/casestudy/CaseStudyMenu'
-import { CaseStudyPlayer } from '@/ui/casestudy/CaseStudyPlayer'
+import { ReviewHome } from '@/ui/review/ReviewHome'
+import { FlashcardsView } from '@/ui/review/FlashcardsView'
+import { SpacedQuizView } from '@/ui/review/SpacedQuizView'
+import { InterviewPhrasesView } from '@/ui/review/InterviewPhrasesView'
+import { ProgressDashboard } from '@/ui/progress/ProgressDashboard'
+import { AchievementToast } from '@/ui/progress/AchievementToast'
+import { useStreakStore } from '@/game/streakStore'
+
+// Lazy-loaded, not statically imported: these three are the only screens
+// that ever mount a CanvasEditor (pulling in @xyflow/react) or a
+// simulation dashboard chart (pulling in recharts) -- by far the heaviest
+// dependencies in the bundle. Every other route (Library, Quiz, Review,
+// Progress, Journal, Settings) never needs either library at all, so
+// splitting these three out means those routes' first paint doesn't wait
+// on downloading canvas/chart code they'll never use.
+const LevelPlayer = lazy(() => import('@/ui/campaign/LevelPlayer').then((m) => ({ default: m.LevelPlayer })))
+const SandboxView = lazy(() => import('@/ui/sandbox/SandboxView').then((m) => ({ default: m.SandboxView })))
+const CaseStudyPlayer = lazy(() => import('@/ui/casestudy/CaseStudyPlayer').then((m) => ({ default: m.CaseStudyPlayer })))
+
+function RouteLoadingFallback() {
+  // role="status" + aria-live: static imports never had a loading gap to
+  // announce at all, so code-splitting these routes introduced one --
+  // without this, a screen-reader user on a slow connection gets total
+  // silence while the chunk downloads, with no indication anything is
+  // happening.
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-ink-950" role="status" aria-live="polite">
+      <p className="font-mono text-xs uppercase tracking-widest text-ink-500">Loading…</p>
+    </div>
+  )
+}
 
 function ChapterMapRoute() {
   const navigate = useNavigate()
@@ -65,15 +94,17 @@ function LevelRoute() {
   }
 
   return (
-    <LevelPlayer
-      level={level}
-      challengeMode={searchParams.get('mode') === 'challenge' && isChallengeUnlocked(level.id)}
-      onExit={() => navigate('/')}
-      onLevelComplete={(stars: LevelStars, unlockedKinds: ComponentKind[]) => {
-        completeLevel(level.id, stars, unlockedKinds)
-        navigate('/')
-      }}
-    />
+    <Suspense fallback={<RouteLoadingFallback />}>
+      <LevelPlayer
+        level={level}
+        challengeMode={searchParams.get('mode') === 'challenge' && isChallengeUnlocked(level.id)}
+        onExit={() => navigate('/')}
+        onLevelComplete={(stars: LevelStars, unlockedKinds: ComponentKind[]) => {
+          completeLevel(level.id, stars, unlockedKinds)
+          navigate('/')
+        }}
+      />
+    </Suspense>
   )
 }
 
@@ -118,7 +149,11 @@ function CaseStudyRoute() {
   // Router reuses the component instance and only updates the param) --
   // without it, CaseStudyPlayer's local stage/timer/transcript state would
   // leak from whichever case study was open before.
-  return <CaseStudyPlayer key={caseStudy.id} caseStudy={caseStudy} onExit={() => navigate('/case-studies')} />
+  return (
+    <Suspense fallback={<RouteLoadingFallback />}>
+      <CaseStudyPlayer key={caseStudy.id} caseStudy={caseStudy} onExit={() => navigate('/case-studies')} />
+    </Suspense>
+  )
 }
 
 function AppRoutes() {
@@ -128,7 +163,14 @@ function AppRoutes() {
       <Route path="/" element={<ChapterMapRoute />} />
       <Route path="/level/:levelId" element={<LevelRoute />} />
       <Route path="/journal" element={<JournalView onBack={() => navigate('/')} />} />
-      <Route path="/sandbox" element={<SandboxView onBack={() => navigate('/')} />} />
+      <Route
+        path="/sandbox"
+        element={
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <SandboxView onBack={() => navigate('/')} />
+          </Suspense>
+        }
+      />
       <Route path="/quiz" element={<QuizView onBack={() => navigate('/')} />} />
       <Route path="/settings" element={<SettingsView onBack={() => navigate('/')} />} />
       <Route path="/library" element={<LibraryHome />} />
@@ -136,8 +178,14 @@ function AppRoutes() {
       <Route path="/library/glossary" element={<GlossaryPage />} />
       <Route path="/library/numbers" element={<NumbersPage />} />
       <Route path="/library/cheatsheet/:chapterId" element={<CheatSheetPage />} />
+      <Route path="/library/attribution" element={<AttributionPage />} />
       <Route path="/case-studies" element={<CaseStudyMenuRoute />} />
       <Route path="/case-studies/:caseStudyId" element={<CaseStudyRoute />} />
+      <Route path="/review" element={<ReviewHome onBack={() => navigate('/')} />} />
+      <Route path="/review/flashcards" element={<FlashcardsView onBack={() => navigate('/review')} />} />
+      <Route path="/review/quiz" element={<SpacedQuizView onBack={() => navigate('/review')} />} />
+      <Route path="/review/interview-phrases" element={<InterviewPhrasesView onBack={() => navigate('/review')} />} />
+      <Route path="/progress" element={<ProgressDashboard onBack={() => navigate('/')} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
@@ -146,6 +194,7 @@ function AppRoutes() {
 function App() {
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
   const theme = useSettingsStore((s) => s.theme)
+  const recordVisitToday = useStreakStore((s) => s.recordVisitToday)
 
   useEffect(() => {
     document.documentElement.dataset.reducedMotion = reducedMotion ? 'true' : 'false'
@@ -160,9 +209,18 @@ function App() {
     document.documentElement.dataset.theme = theme
   }, [theme])
 
+  // "Opened the app today" is the simplest honest streak signal this
+  // app can measure without a backend -- see streakStore.ts. Once per
+  // mount is enough; recordVisitToday itself no-ops on a second call the
+  // same calendar day.
+  useEffect(() => {
+    recordVisitToday()
+  }, [recordVisitToday])
+
   return (
     <HashRouter>
       <SearchPalette />
+      <AchievementToast />
       <AppRoutes />
     </HashRouter>
   )
