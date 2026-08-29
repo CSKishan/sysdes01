@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import { Link, useLocation } from 'react-router-dom'
 import { BookMarked, ArrowLeft } from 'lucide-react'
+import { SearchButton } from './SearchPalette'
 
 const TABS = [
   { href: '/library', label: 'Topics', exact: true },
@@ -17,15 +18,14 @@ export function LibraryLayout({ children }: { children: ReactNode }) {
   const location = useLocation()
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <div className="mx-auto max-w-5xl px-6 py-10">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <BookMarked className="h-6 w-6 text-brand-500" strokeWidth={1.6} />
           <div>
             <h1 className="text-xl font-semibold text-ink-100">Library</h1>
             <p className="font-mono text-[10px] uppercase tracking-wide text-ink-400">
-              Every topic, ungated -- press <kbd className="border border-ink-600 bg-ink-800 px-1">Ctrl</kbd>+
-              <kbd className="border border-ink-600 bg-ink-800 px-1">K</kbd> to search
+              Every topic, ungated
             </p>
           </div>
         </div>
@@ -37,6 +37,8 @@ export function LibraryLayout({ children }: { children: ReactNode }) {
           Map
         </Link>
       </header>
+
+      <SearchButton className="mb-8 w-full sm:w-96" />
 
       <nav className="mb-8 flex gap-1 border-b border-ink-800">
         {TABS.map((tab) => {
