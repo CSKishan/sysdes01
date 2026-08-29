@@ -1,17 +1,43 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import clsx from 'clsx'
 import { useNavigate } from 'react-router-dom'
 import { Search, BookOpen, Tag } from 'lucide-react'
 import { searchContent } from '@/content/searchIndex'
+import { useSearchPaletteStore } from './searchPaletteStore'
 
-/** Global Ctrl/Cmd-K quick-open over the Library corpus (Phase 1.2). Mounted
- * once at the app root so it works from anywhere, not just inside /library
- * -- "look something up mid-level" is a real use case this game didn't
- * support before. */
+/** The visible entry point to the palette -- looks like a search field,
+ * acts as a button. Rendered on the screens where "look something up" is
+ * a likely next move (the map, every Library page). */
+export function SearchButton({ className }: { className?: string }) {
+  const setOpen = useSearchPaletteStore((s) => s.setOpen)
+  return (
+    <button
+      type="button"
+      onClick={() => setOpen(true)}
+      aria-keyshortcuts="Control+K Meta+K"
+      className={clsx(
+        'inline-flex items-center gap-2 border border-ink-700 bg-ink-800 px-3 py-2 text-left text-sm text-ink-500 transition-colors hover:border-brand-500/50 hover:text-ink-300',
+        className,
+      )}
+    >
+      <Search className="h-4 w-4 shrink-0" strokeWidth={1.8} />
+      <span className="flex-1 truncate">Search topics &amp; terms…</span>
+      <kbd className="hidden shrink-0 border border-ink-700 px-1.5 py-0.5 font-mono text-[10px] sm:inline">Ctrl K</kbd>
+    </button>
+  )
+}
+
+/** Global quick-open over the Library corpus (Phase 1.2). Mounted once at
+ * the app root so it works from anywhere, not just inside /library --
+ * "look something up mid-level" is a real use case this game didn't
+ * support before. Opens on Ctrl/Cmd-K or from any <SearchButton>.
+ *
+ * The outer component owns only the shortcut wiring; the dialog and its
+ * query state live in a child that mounts fresh on each open, so the
+ * field always starts empty without an effect resetting it. */
 export function SearchPalette() {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const [activeIndex, setActiveIndex] = useState(0)
-  const navigate = useNavigate()
+  const open = useSearchPaletteStore((s) => s.open)
+  const setOpen = useSearchPaletteStore((s) => s.setOpen)
 
   const openRef = useRef(open)
   useEffect(() => {
@@ -22,20 +48,23 @@ export function SearchPalette() {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        if (openRef.current) {
-          setOpen(false)
-        } else {
-          setQuery('')
-          setActiveIndex(0)
-          setOpen(true)
-        }
+        setOpen(!openRef.current)
       } else if (e.key === 'Escape') {
         setOpen(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [setOpen])
+
+  if (!open) return null
+  return <SearchPaletteDialog onClose={() => setOpen(false)} />
+}
+
+function SearchPaletteDialog({ onClose }: { onClose: () => void }) {
+  const [query, setQuery] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const navigate = useNavigate()
 
   // Stable across re-renders (typing, arrow keys) so React attaches it once
   // per actual mount of the input -- an inline `ref={(el) => ...}` here
@@ -48,16 +77,14 @@ export function SearchPalette() {
   const results = searchContent(query)
 
   function go(href: string) {
-    setOpen(false)
+    onClose()
     navigate(href)
   }
-
-  if (!open) return null
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-ink-950/70 px-4 pt-24"
-      onClick={() => setOpen(false)}
+      onClick={onClose}
     >
       <div
         className="corner-marks w-full max-w-lg border border-ink-700 bg-ink-900 shadow-2xl"
